@@ -1,0 +1,12 @@
+/.tools/
+/local/
+/build/
+*.gpr
+*.rep/
+*.[iI][sS][oO]
+*.[cC][hH][dD]
+*.[eE][lL][fF]
+*.[hH][uU][gG]
+[rR][dD][hH].[dD][iI][rR]
+[sS][lL][uU][sS]_211.82
+[sS][yY][sS][tT][eE][mM].[cC][nN][fF]
