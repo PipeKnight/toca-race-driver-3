@@ -136,4 +136,16 @@ Separate resource references in the same ELF help locate the rest of a track's i
 | `TrackOcc.ini` | `0x0021a100` | Called by `0x0021a730`. |
 | `.ai` | `0x0020d338` | Called by `0x0020dcd8`. The full archive path and file role need runtime verification. |
 
-Near ISO byte `0x68393788` in `RDH_1.HUG`, the reference disc contains text records for `osc1`, `osc2`, and `osc3`. These records include `TrackID`, `FullName`, `HOFIndex`, and `LengthInKm`. Ghidra shows references to `TrackID`, `HOFIndex`, and `LengthInKm` inside `0x001de628`, called by `0x001e96b0`. Trace that call path to identify the input file and determine how the game builds its list of selectable tracks. A new race slot also needs verified geometry, collision, checkpoints, and AI paths.
+An indexed `BIGF` at `RDH_1.HUG` sector 80673 (ISO byte `0x68390800`) holds 80 members containing track metadata. The `osc1.ini`, `osc2.ini`, and `osc3.ini` members include `TrackID`, `HOFIndex`, and `LengthInKm`. The directory begins at package offset `0x24`, the data base is `0x7c0`, and `osc1.ini` starts at package offset `0x2f80` with a length of 160 bytes. Reading the original ISO and inspecting the extracted disc directory located the same member.
+
+```text
+java scripts/InspectDisc.java <extracted-disc-directory> --bigf 1 80673 30720 osc1.ini
+```
+
+The catalog object exposes `TrackInfo.big` and `Mods\Tracks` through adjacent methods at `0x001e9690` and `0x001e96a0`. Its callback at `0x001e96b0` sends each entry to `0x001de628` and increments a counter after parsing. The `Mods\Tracks` string provides a second loader path to investigate.
+
+A diagnostic runner read the catalog at guest frame 15 in two reads covering nine sectors. A read-time overlay repacked the catalog within that range, preserving every stock member's contents and order, and appended a synthetic `tqa1.ini` entry. A repacked control and the extended catalog both preserved all 80 original parsed records byte for byte. The extended catalog produced an 81st record with ID `tqa1`, short name `QA Circuit`, full name `QA Catalog Circuit`, and ordinal 80. A payload starting at `0x4320` reached the callback with incomplete metadata, so the successful repack put the payload earlier in the resource. The disc was read-only. Private test data and traces are under `local/track-slot-research/`.
+
+The Autosport Clio Cup Free Race fixture added two rounds to `rccuf.ini`, referencing stock Oschersleben (`osc1`) and the synthetic track (`tqa1`), while retaining its nine original rounds. The game's track carousel displayed **Motopark Oschersleben** and **QA Catalog Circuit** as consecutive choices. Accepting the new entry opened **Select Car**. The test reached frame 5240 with 341 card reads, zero card writes, and the same memory card SHA-256. A checkpoint replay continued through car selection and race setup to **Next Session: Race · QA Circuit · Sunny**. Screenshots are in `clio-track-selection/frames/` and `clio-track-start/frames/` under the private test data directory.
+
+The test entry uses Oschersleben's `HOFIndex` for this menu experiment. A playable import needs separately verified record storage, preview assets, geometry, collision, checkpoints, and AI paths.
