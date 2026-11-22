@@ -9,6 +9,7 @@ param(
     [string]$DataDirectory,
     [string]$CompilerPath,
     [string]$RoadAmericaDirectory,
+    [string]$DtmModDirectory,
     [switch]$ValidateOnly,
     [switch]$Help
 )
@@ -23,6 +24,7 @@ DVD CHD requires a runner built with libchdr. -Iso remains an alias for -Disc.
 Use -PreparedDirectory to run a prepared copy containing ps2run.exe and its runtime files.
 Use -DataDirectory to choose where to keep saves and runtime files.
 Use -RoadAmericaDirectory to load a locally generated Road America add-on with its own memory card.
+Use -DtmModDirectory to load local DTM overlays with a separate memory card.
 The game uses its own portable memory card. Use -NoSave to run without a card.
 Set -FrameLimit to close automatically after a fixed number of guest frames.
 Set -ValidateOnly to check the disc without launching the runner.
@@ -82,8 +84,19 @@ if (!$ValidateOnly -or $isFolder -or $isChd) {
         $addonPath = (Resolve-Path -LiteralPath $RoadAmericaDirectory).ProviderPath
         $runnerArgs += @('--road-america', (Quote-RunnerPath $addonPath))
     }
+    if ($DtmModDirectory) {
+        if (!(Test-Path -LiteralPath $DtmModDirectory -PathType Container)) {
+            [Console]::Error.WriteLine('Pass a DTM mod directory.')
+            exit 2
+        }
+        $dtmPath = (Resolve-Path -LiteralPath $DtmModDirectory).ProviderPath
+        $runnerArgs += @('--dtm-mod', (Quote-RunnerPath $dtmPath))
+    }
     if (!$NoSave) {
         $cardName = if ($RoadAmericaDirectory) { 'road-america.ps2' } else { 'toca-slus-21182.ps2' }
+        if ($DtmModDirectory) {
+            $cardName = if ($RoadAmericaDirectory) { 'road-america-dtm.ps2' } else { 'dtm-mod.ps2' }
+        }
         $memoryCard = Join-Path $gameDir $cardName
         $runnerArgs += @('--memcard', (Quote-RunnerPath $memoryCard))
     }

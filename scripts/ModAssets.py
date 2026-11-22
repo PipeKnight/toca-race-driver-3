@@ -28,6 +28,7 @@ REFERENCE_PACKAGES = {
     "oschersleben-scene": (1, DMA_SECTOR, DMA_BYTES),
     "oschersleben-metadata": (1, 522960, 328064),
     "dtm-cars": (2, 187552, 5145344),
+    "dtm-mercedes-hi": (2, 190800, 369788),
 }
 
 
@@ -137,6 +138,9 @@ def read_package(args):
 
 def archive_command(args):
     archive = read_package(args)
+    if args.command == "extract-resource":
+        write_extracted(args.output, archive)
+        return
     if args.command == "replace":
         result = replace_member(archive, args.inside + [args.member], args.replacement.read_bytes())
         with args.output.open("xb") as stream:
@@ -146,14 +150,18 @@ def archive_command(args):
         archive = find_member(archive, name)[0].read(archive)
     if args.command == "extract":
         result = find_member(archive, args.member)[0].read(archive)
-        with args.output.open("xb") as stream:
-            stream.write(result)
-        print(f"{len(result)} bytes  sha256 {hashlib.sha256(result).hexdigest()}")
+        write_extracted(args.output, result)
     else:
         print(f"{'Name':32} {'Offset':>10} {'Stored':>9} {'Decoded':>9}  Encoding")
         for member in members(archive):
             encoding = "LZSS" if member.compressed else "raw"
             print(f"{member.name:32} {member.offset:#10x} {member.stored:9d} {member.expanded:9d}  {encoding}")
+
+
+def write_extracted(output, data):
+    with output.open("xb") as stream:
+        stream.write(data)
+    print(f"{len(data)} bytes  sha256 {hashlib.sha256(data).hexdigest()}")
 
 
 def part_map(args):
@@ -245,20 +253,26 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     for name, help_text in (("list", "list archive members"), ("extract", "extract a decoded member"),
+                            ("extract-resource", "extract a complete disc resource by range or name"),
                             ("replace", "replace one member within the original package extent")):
         command = commands.add_parser(name, help=help_text)
         source = command.add_mutually_exclusive_group(required=True)
-        source.add_argument("--file", type=Path, help="local BIGF or JPAK package")
+        if name == "extract-resource":
+            command.set_defaults(file=None)
+        else:
+            source.add_argument("--file", type=Path, help="local BIGF or JPAK package")
         source.add_argument("--disc", type=Path, help="mounted or extracted SLUS-21182 v1.02 DVD directory")
         location = command.add_mutually_exclusive_group()
         location.add_argument("--package", choices=REFERENCE_PACKAGES, help="known package on the reference disc")
         location.add_argument("--range", dest="archive_range", nargs=3, type=int, metavar=("HUG", "SECTOR", "BYTES"),
                               help="use a traced HUG archive index, archive-relative sector and byte count")
-        command.add_argument("--inside", action="append", default=[], help="descend into a nested member, repeat as needed")
-        if name != "list":
+        if name != "extract-resource":
+            command.add_argument("--inside", action="append", default=[], help="descend into a nested member, repeat as needed")
+        if name in ("extract", "replace"):
             command.add_argument("member")
             if name == "replace":
                 command.add_argument("replacement", type=Path)
+        if name != "list":
             command.add_argument("output", type=Path, help="new output file")
         command.set_defaults(run=archive_command)
     for name, help_text, handler in (

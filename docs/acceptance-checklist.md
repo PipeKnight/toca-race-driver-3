@@ -61,6 +61,7 @@ The first release target is the North American PS2 disc `SLUS-21182` v1.02. Play
 
 ## Separate modding milestone
 
+- [x] Edit a stock PS2 vehicle mesh and load it through the portable Windows backend. Verify the standalone high-detail mesh and an independent class-package edit in the Mercedes DTM race. [DTM verification](ps2-dtm-models.md#windows-verification)
 - [x] Document the PS2 modding workflow and verify archive tools against the reference disc. Round-trip a DTM part map, repack a nested edit, and load an edited Road America collision surface in a Direct3D 12 race. [Modding guide](modding.md)
 - [x] Finish a race in an additional track slot using stock geometry, collision, and race data. QA Circuit finished an Autosport Clio Cup Free Race on Windows 11. [QA Circuit race](ps2-disc-and-archives.md#finish-a-race-in-qa-circuit)
 - [x] Finish a race with donor collision and converted route data. The Road America QA Circuit probe reached Race Results in 20th with a classified time of 3:25.21, including a 20-second penalty. [Road America import probes](ps2-disc-and-archives.md#road-america-import-probes)

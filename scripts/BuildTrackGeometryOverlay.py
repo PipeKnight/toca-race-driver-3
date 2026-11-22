@@ -2,6 +2,7 @@
 """Build a Road America geometry overlay for the local QA Circuit experiment."""
 
 import argparse
+from dataclasses import dataclass
 import math
 from pathlib import Path
 import struct
@@ -36,19 +37,20 @@ def read_word(data, offset):
     return WORD.unpack_from(data, offset)[0]
 
 
-def vertex_bounds(source, node, payload_bytes, base):
-    tag, address = RELOCATION.unpack_from(source, node)
-    offset = address - base
-    end = offset + (tag & 0xFFFF) * 16
-    if (tag >> 28) & 7 != 3 or not 0 <= offset <= end <= payload_bytes:
-        raise ValueError("Invalid scene leaf DMA packet")
-    if offset == end:
-        return None  # A zero-length REF has no vertices to include in its parent's bounds.
+@dataclass(frozen=True)
+class VifCommand:
+    operation: int
+    immediate: int
+    count: int
+    payload: int
+    size: int
+
+
+def vif_commands(source, offset, end):
     read_cycle = write_cycle = 1
-    low = [math.inf] * 3
-    high = [-math.inf] * 3
-    vertices = 0
     while offset < end:
+        if end - offset < WORD.size:
+            raise ValueError("Truncated VIF command")
         command = read_word(source, offset)
         offset += WORD.size
         operation = (command >> 24) & 0x7F
@@ -73,21 +75,37 @@ def vertex_bounds(source, node, payload_bytes, base):
             components = ((operation >> 2) & 3) + 1
             bits = 16 if (operation & 15) == 15 else components * (32, 16, 8, 5)[operation & 3]
             amount = (elements * bits + 31) // 32 * 4
-            if operation in (0x68, 0x78) and offset + amount <= end:
-                for point in VERTEX.iter_unpack(source[offset:offset + amount]):
-                    if not all(math.isfinite(value) and abs(value) <= 100000 for value in point):
-                        raise ValueError("Invalid vertex coordinate in scene leaf")
-                    for axis, value in enumerate(point):
-                        low[axis] = min(low[axis], value)
-                        high[axis] = max(high[axis], value)
-                    vertices += 1
         elif operation in COMMANDS_WITHOUT_PAYLOAD:
             amount = 0
         else:
-            raise ValueError(f"Unknown leaf VIF command {operation:#x}")
+            raise ValueError(f"Unknown VIF command {operation:#x}")
         if offset + amount > end:
-            raise ValueError("VIF command exceeds scene leaf DMA packet")
+            raise ValueError("VIF command exceeds the packet extent")
+        yield VifCommand(operation, immediate, count, offset, amount)
         offset += amount
+
+
+def vertex_bounds(source, node, payload_bytes, base):
+    tag, address = RELOCATION.unpack_from(source, node)
+    offset = address - base
+    end = offset + (tag & 0xFFFF) * 16
+    if (tag >> 28) & 7 != 3 or not 0 <= offset <= end <= payload_bytes:
+        raise ValueError("Invalid scene leaf DMA packet")
+    if offset == end:
+        return None  # A zero-length REF has no vertices to include in its parent's bounds.
+    low = [math.inf] * 3
+    high = [-math.inf] * 3
+    vertices = 0
+    for command in vif_commands(source, offset, end):
+        if command.operation not in (0x68, 0x78):
+            continue
+        for point in VERTEX.iter_unpack(source[command.payload:command.payload + command.size]):
+            if not all(math.isfinite(value) and abs(value) <= 100000 for value in point):
+                raise ValueError("Invalid vertex coordinate in scene leaf")
+            for axis, value in enumerate(point):
+                low[axis] = min(low[axis], value)
+                high[axis] = max(high[axis], value)
+            vertices += 1
     if vertices < 3:
         raise ValueError("Scene leaf contains fewer than three position vertices")
     return tuple(low + high)

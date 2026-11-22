@@ -1,0 +1,205 @@
+--- a/runtime/include/ps2/disc.hpp
++++ b/runtime/include/ps2/disc.hpp
+@@ -32,6 +32,7 @@
+ bool ready(std::uint32_t sector, std::uint32_t count);
+ // Resource lookup hooks for the supported TOCA Race Driver 3 disc.
+ void set_road_america_directory(const std::string &folder);
++void set_dtm_mod_directory(const std::string &folder);
+ bool road_america_enabled();
+ void road_america_path(std::uint32_t address);
+ std::uint32_t road_america_member(std::uint32_t address, std::uint32_t scratch);
+--- a/runtime/src/disc.cpp
++++ b/runtime/src/disc.cpp
+@@ -99,6 +99,107 @@
+     return true;
+ }
+ 
++struct DtmResource {
++    const char *name;
++    std::uint32_t sector;
++    std::size_t size;
++};
++
++constexpr std::array dtm_resources{
++    DtmResource{"DTMX.JPK", 187552, 5145344},
++    DtmResource{"DTM_C_KLASSE_HI.MSH", 190800, 369788},
++};
++std::array<std::vector<std::uint8_t>, dtm_resources.size()> g_dtm_overlays;
++std::uint32_t g_dtm_archive_sector;
++std::string g_dtm_mod_directory;
++
++bool valid_dtm_package(const std::vector<std::uint8_t> &data) {
++    constexpr std::size_t count = 57, row_size = 32, directory_end = 32 + count * row_size;
++    if (std::memcmp(data.data(), "JPAK", 4) || u32(data.data() + 8) != count) return false;
++    auto first_data = data.size();
++    for (std::size_t row = 32; row < directory_end; row += row_size) {
++        const auto offset = u32(data.data() + row + 8);
++        const auto bytes = u32(data.data() + row + 4);
++        if (offset < directory_end || offset > data.size() || bytes > data.size() - offset) return false;
++        first_data = std::min(first_data, std::size_t{offset});
++    }
++    for (std::size_t row = 32; row < directory_end; row += row_size) {
++        const auto name = u32(data.data() + row);
++        if (name < directory_end || name >= first_data ||
++            !std::memchr(data.data() + name, 0, first_data - name)) return false;
++    }
++    return true;
++}
++
++bool valid_dtm_hi_mesh(const std::vector<std::uint8_t> &data) {
++    const auto footer = data.size() - 12;
++    const auto count = u32(data.data() + footer);
++    const auto payload = u32(data.data() + footer + 4);
++    if (u32(data.data() + footer + 8) != 0x0abd0be0 || payload % 16 || payload > footer ||
++        (footer - payload) % 8 || (footer - payload) / 8 != count) return false;
++    for (std::size_t row = payload; row < footer; row += 8) {
++        const auto offset = u32(data.data() + row);
++        if (offset >= payload || offset % 4 || u32(data.data() + row + 4) != 4) return false;
++    }
++    return true;
++}
++
++bool prepare_dtm_mod() {
++    if (g_dtm_mod_directory.empty()) return true;
++    const auto archive = find("RDH_2.HUG");
++    if (!find("SLUS_211.82") || !archive || archive->size != 1546364928u) {
++        std::fprintf(stderr, "[dtm-mod] requires SLUS-21182 v1.02\n");
++        return false;
++    }
++    g_dtm_archive_sector = archive->sector;
++    bool present = false;
++    for (std::size_t i = 0; i < dtm_resources.size(); ++i) {
++        const auto &resource = dtm_resources[i];
++        const auto path = os::path(g_dtm_mod_directory) / resource.name;
++        const auto filename = os::utf8(path);
++        std::error_code error;
++        if (!std::filesystem::exists(path, error) && !error) continue;
++        auto *file = os::open(filename, "rb");
++        if (!file) {
++            std::fprintf(stderr, "[dtm-mod] could not open %s\n", filename.c_str());
++            return false;
++        }
++        auto &data = g_dtm_overlays[i];
++        data.resize(resource.size);
++        const auto read = std::fread(data.data(), 1, data.size(), file);
++        const bool complete = std::fgetc(file) == EOF && !std::ferror(file);
++        std::fclose(file);
++        if (read != data.size() || !complete || !(i == 0 ? valid_dtm_package(data) : valid_dtm_hi_mesh(data))) {
++            std::fprintf(stderr, "[dtm-mod] invalid overlay %s\n", filename.c_str());
++            return false;
++        }
++        present = true;
++    }
++    if (!present) std::fprintf(stderr, "[dtm-mod] supply DTMX.JPK or DTM_C_KLASSE_HI.MSH\n");
++    return present;
++}
++
++bool copy_overlay_range(std::uint64_t start, void *out, std::size_t got,
++                        std::uint64_t offset, const std::vector<std::uint8_t> &data) {
++    const auto first = std::max(start, offset);
++    const auto end = std::min(start + got, offset + data.size());
++    if (first >= end) return false;
++    std::memcpy(static_cast<std::uint8_t *>(out) + first - start, data.data() + first - offset, end - first);
++    return first == offset;
++}
++
++void apply_dtm_mod(std::uint32_t sector, void *out, std::size_t got) {
++    const std::uint64_t start = std::uint64_t{sector} * kSector;
++    for (std::size_t i = 0; i < dtm_resources.size(); ++i) {
++        const auto &data = g_dtm_overlays[i];
++        if (data.empty()) continue;
++        const auto &resource = dtm_resources[i];
++        const std::uint64_t offset = std::uint64_t{g_dtm_archive_sector + resource.sector} * kSector;
++        if (copy_overlay_range(start, out, got, offset, data))
++            std::fprintf(stderr, "[dtm-mod] loading %s\n", resource.name);
++    }
++}
++
+ std::string_view guest_name(std::uint32_t address) {
+     if (address >= kRamSize) return {};
+     const auto *first = reinterpret_cast<const char *>(g_ram + address);
+@@ -115,11 +216,7 @@
+         if (i >= 2 && !(active & (1u << (i - 2)))) continue;
+         const auto &data = mod.data[i];
+         const std::uint64_t offset = std::uint64_t{mod.archive_sector + road_america_members[i].sector} * kSector;
+-        const auto first = std::max(start, offset);
+-        const auto end = std::min(start + got, offset + data.size());
+-        if (first >= end) continue;
+-        std::memcpy(static_cast<std::uint8_t *>(out) + first - start, data.data() + first - offset, end - first);
+-        if (i >= 2 && first == offset)
++        if (copy_overlay_range(start, out, got, offset, data) && i >= 2)
+             std::fprintf(stderr, "[road-america] loading %s for tqa1\n", road_america_members[i].name);
+     }
+ }
+@@ -261,6 +358,7 @@
+ 
+ bool open(const std::string &name, std::uint64_t size, Reader reader, Probe probe) {
+     g_road_america.reset();
++    g_dtm_overlays = {};
+     g_reader = std::move(reader);
+     g_probe = std::move(probe);
+     g_size = size;
+@@ -282,7 +380,7 @@
+     std::fprintf(stderr, "[disc] %s: %zu files, %llu sectors, layer 1 at %u\n", name.c_str(), g_index.size(),
+                  static_cast<unsigned long long>(g_size / kSector), g_layer1);
+     g_indexed = true;
+-    if (!prepare_road_america()) return false;
++    if (!prepare_road_america() || !prepare_dtm_mod()) return false;
+     if (!os::env("PS2_DISC_CHECK").empty()) self_check();
+     return true;
+ }
+@@ -291,6 +389,7 @@
+ 
+ void set_road_america_directory(const std::string &folder) { g_road_america_directory = folder; }
+ bool road_america_enabled() { return g_road_america != nullptr; }
++void set_dtm_mod_directory(const std::string &folder) { g_dtm_mod_directory = folder; }
+ 
+ void road_america_path(std::uint32_t address) {
+     if (!g_road_america) return;
+@@ -336,6 +435,7 @@
+     }
+     if (got < want) std::memset(static_cast<std::uint8_t *>(out) + got, 0, want - got);
+     apply_road_america(sector, out, got);
++    apply_dtm_mod(sector, out, got);
+     // A game on a two-layer disc reads the second layer with the same sector numbers, which simply continue: the layer
+     // boundary is not a gap in the image. Say so once, and say it when a read comes back short (the rest is filled with
+     // zeros, which would otherwise go unnoticed). PS2_TRACE_DISC=1 prints every read in layer 1 and past the 4 GiB line.
+--- a/host/main.cpp
++++ b/host/main.cpp
+@@ -106,7 +106,7 @@
+                  "              [--press frame:button[+button][:frames]]... [--window] [--fullscreen]\n"
+                  "              [--save-state frame:file] [--load-state file|newest] [--quick-dir dir] [--widescreen] [--patches file]\n"
+                  "              [--record file] [--no-record] [--replay file [--replay-continue]] [--rtc seconds] [--game-dir dir]\n"
+-                 "              [--road-america dir]\n");
++                 "              [--road-america dir] [--dtm-mod dir]\n");
+     return 2;
+ }
+ 
+@@ -842,7 +842,7 @@
+ #endif
+     std::vector<std::string> args{argv[1]};
+     [[maybe_unused]] bool window = false, fullscreen = false;
+-    std::string load_path, given_game_dir, road_america_directory;
++    std::string load_path, given_game_dir, road_america_directory, dtm_mod_directory;
+     bool no_record = false;
+     ps2::g_options.disc_program = from_disc;
+     for (int i = 0; i < argc; ++i) {
+@@ -873,6 +873,7 @@
+         else if (a == "--disc" && i + 1 < argc) ps2::g_options.disc_path = argv[++i];
+         else if (a == "--game-dir" && i + 1 < argc) given_game_dir = argv[++i];
+         else if (a == "--road-america" && i + 1 < argc) road_america_directory = argv[++i];
++        else if (a == "--dtm-mod" && i + 1 < argc) dtm_mod_directory = argv[++i];
+         else if (a == "--memcard" && i + 1 < argc) ps2::g_options.memcard_path = argv[++i];
+         else if (a == "--trace-iop") ps2::g_options.trace_iop_modules = true;
+         else if (a == "--trace-iop-hle") ps2::g_options.trace_iop_hle = true;
+@@ -914,8 +915,9 @@
+         std::unique(ps2::g_options.frame_capture_frames.begin(), ps2::g_options.frame_capture_frames.end()),
+         ps2::g_options.frame_capture_frames.end());
+ 
+-    if (!road_america_directory.empty() && !from_disc) return usage();
++    if ((!road_america_directory.empty() || !dtm_mod_directory.empty()) && !from_disc) return usage();
+     ps2::disc::set_road_america_directory(road_america_directory);
++    ps2::disc::set_dtm_mod_directory(dtm_mod_directory);
+     std::string program_location = program;
+     if (from_disc) {
+         if (ps2::g_options.disc_path.empty()) return usage();
