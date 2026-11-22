@@ -4,6 +4,8 @@ The developer build for the North American PS2 release `SLUS-21182` v1.02 transl
 
 ## Launch the local build
 
+For automatic first-run setup from Windows, try the [Windows preview launcher](windows-preview.md). The developer launcher below also supports running an existing prepared build directly from PowerShell.
+
 From PowerShell 7 at the project root, pass your copy of the supported DVD as an ISO, a matching DVD CHD, or a directory of extracted disc files.
 
 ```powershell

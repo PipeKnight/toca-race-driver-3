@@ -6,19 +6,24 @@ param(
     [switch]$NoSave,
     [uint32]$FrameLimit = 0,
     [string]$PreparedDirectory,
+    [string]$DataDirectory,
+    [string]$CompilerPath,
+    [switch]$ValidateOnly,
     [switch]$Help
 )
 
 if ($Help) {
     @'
-Usage: Play-RecompiledToca.ps1 -Disc <path> [-PreparedDirectory <path>] [-Fullscreen] [-NoSave] [-FrameLimit <count>]
+Usage: Play-RecompiledToca.ps1 -Disc <path> [-PreparedDirectory <path>] [-DataDirectory <path>] [-Fullscreen] [-NoSave] [-FrameLimit <count>]
 
 Launch the local Windows build for SLUS-21182 v1.02 from an ISO, DVD CHD, or extracted disc folder.
 The launcher checks the DVD data or extracted-file layout's SHA-256 before starting the runner.
 DVD CHD requires a runner built with libchdr. -Iso remains an alias for -Disc.
 Use -PreparedDirectory to run a prepared copy containing ps2run.exe and its runtime files.
+Use -DataDirectory to choose where to keep saves and runtime files.
 The game uses its own portable memory card. Use -NoSave to run without a card.
 Set -FrameLimit to close automatically after a fixed number of guest frames.
+Set -ValidateOnly to check the disc without launching the runner.
 See docs/native-recompilation.md for build instructions.
 '@
     exit 0
@@ -38,36 +43,42 @@ function Quote-RunnerPath([string]$Path) {
     return '"' + ($Path -replace '(\\+)$', '$1$1') + '"'
 }
 
-$root = Split-Path -Parent $PSScriptRoot
-$backend = Join-Path $root '.tools\ps2-native-recomp-0.0.5'
-$compiler = $null
-if ($PreparedDirectory) {
-    if (!(Test-Path -LiteralPath $PreparedDirectory -PathType Container)) {
-        [Console]::Error.WriteLine('Pass an existing prepared directory with -PreparedDirectory.')
-        exit 2
+$compiler = $CompilerPath
+if (!$ValidateOnly -or $isFolder -or $isChd) {
+    $root = Split-Path -Parent $PSScriptRoot
+    $backend = Join-Path $root '.tools\ps2-native-recomp-0.0.5'
+    if ($PreparedDirectory) {
+        if (!(Test-Path -LiteralPath $PreparedDirectory -PathType Container)) {
+            [Console]::Error.WriteLine('Pass an existing prepared directory with -PreparedDirectory.')
+            exit 2
+        }
+        $gameDir = (Resolve-Path -LiteralPath $PreparedDirectory).Path
+        $runner = Join-Path $gameDir 'ps2run.exe'
+        $tempDir = Join-Path $gameDir 'temp'
+    } else {
+        $runner = Join-Path $backend 'build\native-toca-slus-21182\ps2run.exe'
+        $gameDir = Join-Path $backend 'games\toca-slus-21182'
+        if (!$compiler) { $compiler = Join-Path $backend 'tools\portable\llvm-mingw\bin\clang++.exe' }
+        $tempDir = Join-Path $backend 'temp'
     }
-    $gameDir = (Resolve-Path -LiteralPath $PreparedDirectory).Path
-    $runner = Join-Path $gameDir 'ps2run.exe'
-    $tempDir = Join-Path $gameDir 'temp'
-} else {
-    $runner = Join-Path $backend 'build\native-toca-slus-21182\ps2run.exe'
-    $gameDir = Join-Path $backend 'games\toca-slus-21182'
-    $compiler = Join-Path $backend 'tools\portable\llvm-mingw\bin\clang++.exe'
-    $tempDir = Join-Path $backend 'temp'
-}
-if (!(Test-Path -LiteralPath $runner -PathType Leaf) -or !(Test-Path -LiteralPath $gameDir -PathType Container)) {
-    [Console]::Error.WriteLine('The local recompilation is incomplete. See docs/native-recompilation.md.')
-    exit 3
-}
+    if (!(Test-Path -LiteralPath $runner -PathType Leaf) -or !(Test-Path -LiteralPath $gameDir -PathType Container)) {
+        [Console]::Error.WriteLine('The local recompilation is incomplete. See docs/native-recompilation.md.')
+        exit 3
+    }
+    if ($DataDirectory) {
+        $gameDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($DataDirectory)
+        $tempDir = Join-Path $gameDir 'temp'
+    }
 
-$displayMode = if ($Fullscreen) { '--fullscreen' } else { '--window' }
-$runnerArgs = @('--disc', (Quote-RunnerPath $discPath), '--game-dir', (Quote-RunnerPath $gameDir), $displayMode)
-if (!$NoSave) {
-    $memoryCard = Join-Path $gameDir 'toca-slus-21182.ps2'
-    $runnerArgs += @('--memcard', (Quote-RunnerPath $memoryCard))
-}
-if ($FrameLimit) {
-    $runnerArgs += @('--frames', $FrameLimit)
+    $displayMode = if ($Fullscreen) { '--fullscreen' } else { '--window' }
+    $runnerArgs = @('--disc', (Quote-RunnerPath $discPath), '--game-dir', (Quote-RunnerPath $gameDir), $displayMode)
+    if (!$NoSave) {
+        $memoryCard = Join-Path $gameDir 'toca-slus-21182.ps2'
+        $runnerArgs += @('--memcard', (Quote-RunnerPath $memoryCard))
+    }
+    if ($FrameLimit) {
+        $runnerArgs += @('--frames', $FrameLimit)
+    }
 }
 
 $previousCompiler = $env:PS2_VU_CXX
@@ -119,6 +130,7 @@ try {
         [Console]::Error.WriteLine("Unsupported disc source. Expected SLUS-21182 v1.02 with $expectedSize decoded bytes and SHA-256 $expectedSha256.")
         exit 2
     }
+    if ($ValidateOnly) { exit 0 }
 
     New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
     if ($compiler -and (Test-Path -LiteralPath $compiler -PathType Leaf)) {
@@ -129,7 +141,16 @@ try {
     if (!$previousEfuTiming) {
         $env:PS2_TOCA_EFU_TIMING = '1'
     }
-    $process = Start-Process -FilePath $runner -ArgumentList $runnerArgs -WorkingDirectory $gameDir -PassThru -Wait
+    $startInfo = [Diagnostics.ProcessStartInfo]::new($runner, ($runnerArgs -join ' '))
+    $startInfo.WorkingDirectory = $gameDir
+    $startInfo.UseShellExecute = $false
+    $process = [Diagnostics.Process]::Start($startInfo)
+    try {
+        $process.WaitForExit()
+        $exitCode = $process.ExitCode
+    } finally {
+        $process.Dispose()
+    }
 } finally {
     if ($discHandle) {
         $discHandle.Dispose()
@@ -139,4 +160,4 @@ try {
     $env:TMP = $previousTmp
     $env:PS2_TOCA_EFU_TIMING = $previousEfuTiming
 }
-exit $process.ExitCode
+exit $exitCode

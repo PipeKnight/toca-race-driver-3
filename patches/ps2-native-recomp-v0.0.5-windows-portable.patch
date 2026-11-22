@@ -1,0 +1,22 @@
+diff --git a/scripts/port.sh b/scripts/port.sh
+--- a/scripts/port.sh
++++ b/scripts/port.sh
+@@ -96,7 +96,7 @@ else
+   [ -z "$dvd_sha256" ] || { echo "--dvd-sha256 requires a DVD CHD or extracted folder" >&2; exit 2; }
+   [ -e "$source_path" ] || [ -e "$game/disc.iso" ] || { echo "$source_path: no such file" >&2; exit 1; }
+ fi
+-if [ -n "$dvd_mode" ]; then
++if [ -n "$dvd_mode" ] || [ -n "${PS2_LIBCHDR_DIR:-}" ]; then
+   [ "$web" = 0 ] || { echo "DVD CHD and extracted-folder setup require --native-only" >&2; exit 2; }
+   if [ -n "${PS2_LIBCHDR_DIR:-}" ]; then
+     [ -f "$PS2_LIBCHDR_DIR/CMakeLists.txt" ] || { echo "PS2_LIBCHDR_DIR must name the libchdr source directory" >&2; exit 2; }
+@@ -145,6 +145,9 @@ if [ "$dvd_mode" = folder ]; then
+ elif [ "$dvd_mode" = chd ]; then
+   if [ "$windows" = 0 ]; then dir=$(cd "$(dirname "$source_path")" && pwd); else dir=$(cd "$(dirname "$source_path")" && pwd -W); fi
+   iso="$dir/$(basename "$source_path")"
++elif [ "${PS2_PORT_DIRECT_ISO:-0}" = 1 ] && [[ "${source_path,,}" == *.iso ]]; then
++  [ -f "$source_path" ] || { echo "$source_path: no such file" >&2; exit 2; }
++  iso="$source_path"
+ elif [ -e "$iso" ]; then
+   echo "already in place"
+ else
