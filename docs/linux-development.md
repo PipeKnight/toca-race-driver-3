@@ -30,7 +30,7 @@ find . -type f \( -name CMakeLists.txt -o -name '*.c' -o -name '*.h' -o \
 tar -xf "$repo/.tools/downloads/libchdr-v0.3.0.tar.gz"
 
 for patch in toca-reflections gs-upload-cache-overlap spu2-envx-preview \
-    spu2-checkpoint-blocks dvd-chd dvd-chd-setup dvd-folder windows-portable; do
+    spu2-checkpoint-blocks dvd-chd dvd-chd-setup dvd-folder windows-portable windows-build-paths; do
     GIT_CEILING_DIRECTORIES="$work" git apply --no-index \
         "$repo/patches/ps2-native-recomp-v0.0.5-$patch.patch" </dev/null || exit 1
 done

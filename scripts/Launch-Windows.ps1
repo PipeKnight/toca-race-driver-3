@@ -103,7 +103,30 @@ function Install-Backend([string]$Destination) {
     }
 }
 
+function Repair-CMakeCompilerDetection {
+    if ($toolchain -notmatch '[[\]]') { return }
+
+    # CMake 4.4.4 treats brackets in its own installation path as glob patterns.
+    $module = Join-Path $toolchain 'cmake\share\cmake-4.4\Modules\CMakeCompilerIdDetection.cmake'
+    $content = [IO.File]::ReadAllText($module)
+    $compilerGlob = '${CMAKE_ROOT}/Modules/Compiler/*-'
+    if (!$content.Contains($compilerGlob)) {
+        if ($content.Contains('${compiler_module_root}/Modules/Compiler/*-')) { return }
+        throw 'The portable CMake compiler detection module is unexpected.'
+    }
+    $declaration = 'function(compiler_id_detection outvar lang)'
+    if (!$content.Contains($declaration)) { throw 'The portable CMake compiler detection function is missing.' }
+    $updated = $content.Replace($declaration, @'
+function(compiler_id_detection outvar lang)
+  string(REGEX REPLACE "([][])" "[\\1]" compiler_module_root "${CMAKE_ROOT}")
+'@).Replace($compilerGlob, '${compiler_module_root}/Modules/Compiler/*-')
+    $staged = "$module.toca"
+    [IO.File]::WriteAllText($staged, $updated)
+    [IO.File]::Replace($staged, $module, [NullString]::Value)
+}
+
 function Invoke-TocaBuild([string]$Backend, [string]$DiscPath, [string]$DvdHash) {
+    Repair-CMakeCompilerDetection
     $savedEnvironment = [Environment]::GetEnvironmentVariables('Process')
     Push-Location -LiteralPath $Backend
     try {
@@ -113,6 +136,8 @@ function Invoke-TocaBuild([string]$Backend, [string]$DiscPath, [string]$DvdHash)
         $env:TEMP = $temp
         $env:TMP = $temp
         $env:MSYSTEM = 'MINGW64'
+        $env:CC = (Join-Path $toolchain 'llvm-mingw\bin\clang.exe').Replace('\', '/')
+        $env:CXX = $compiler.Replace('\', '/')
         $env:PS2_JOBS = [Math]::Min(8, [Environment]::ProcessorCount)
         $env:PS2_PORT_DIRECT_ISO = '1'
         $env:PS2_LIBCHDR_DIR = (Join-Path $Backend $sources.Chd.Directory).Replace('\', '/')

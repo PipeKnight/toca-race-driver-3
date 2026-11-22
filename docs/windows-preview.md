@@ -26,9 +26,7 @@ From the package directory, run the launcher with the path to your disc.
 
 The first launch fetches and verifies the portable compiler and graphics dependencies, extracts the boot ELF, builds the runner, and starts the game. It needs an internet connection until the dependencies have been cached. For an offline first setup, place the upstream dependency archives under `downloads` inside the setup directory. Use the filenames in [WindowsPreviewSources.psd1](../scripts/WindowsPreviewSources.psd1). The upstream setup verifies these archives against its pinned checksums.
 
-Use a setup directory without square brackets for an offline first launch. The bundled checksum tool could not open a dependency archive under a setup path containing brackets. The verified configuration used a separate data directory with brackets and a setup directory with spaces.
-
-A local probe reproduced the failure with both BusyBox `sha256sum` and CMake. For the directory containing brackets, both native programs received the `/c/...` path from MinGit and reported it missing. Bash could read the same file and compute its hash through standard input. Both native tools succeeded when given an explicit Windows path with a drive letter. The full offline build still needs that conversion at the affected tool calls.
+For an offline first launch with the published `0.1.0-preview.2` executable, choose a setup directory without square brackets. The `0.1.0-preview.3` candidate passed the [offline setup test with brackets](#offline-setup-in-paths-with-brackets).
 
 After setup, the same command runs the local build. Use `--direct` to require an existing build, or `--setup-only` to prepare the build without starting the game. `--help` lists all switches. For example, this command stores game data and build files in separate directories and starts fullscreen.
 
@@ -116,6 +114,16 @@ The Windows x64 `0.1.0-preview.2` candidate contains one `TocaRecomp.exe`. Its S
 The standalone candidate launched from a folder holding a copy of an existing `0.1.0-preview.1` memory card and `keys.ini`. It reused the previous prepared setup and ran on the RTX 4070 through Direct3D 12. World Sprintcar Series standings showed **Player One** in first place with **150 points**. The runner reported 341 card reads and zero writes on normal window close. The original card, test copy, and settings retained their hashes. The card passed the filesystem and ECC check. A separate direct launch from a different working directory opened the same data through an explicit `--data-dir` and showed **Dirt Raceway 2 · Sunny** as the next session. Host migration logs are under `local/executable-preview-qa/`.
 
 A clean offline Windows 11 Sandbox on build `26100.9606` copied only the executable and reused verified dependency downloads. Its first launch built the runtime and reached 780 guest frames in 3 minutes and 44 seconds. A direct no-save launch reached 540 frames with the same runner hash. The executable folder still contained only `TocaRecomp.exe`. The unsupported short ISO returned exit code `2` and created no backend or memory card. `--direct` before setup returned exit code `3` and created neither setup nor data. These checks used software graphics and provide clean installation coverage. See `local/executable-preview-qa/guest-plain/` for the guest report and logs.
+
+### Offline setup in paths with brackets
+
+The `0.1.0-preview.3` candidate passes explicit drive-letter paths from MinGit to native tools. CMake escapes brackets when it searches for its compiler detection modules and the generated game units. Ubuntu 24.04 under WSL2 applied all nine source patches, found Clang 18.1.3, and included a generated test unit from a bracketed path in the Ninja build graph.
+
+A clean, offline Windows 11 Sandbox on build `26100.9606` used separate launcher, setup, and player data directories ending in `[qa]`. It started from `C:\` with no development tools detected. The candidate had SHA-256 `402cb6e359d97877e8c8d5caa5016d86d44ba764e7e303ba328d47c10b2eb4ee`. The launcher verified the preseeded dependencies, compiled 224 translated units from the read-only ISO, and reached 780 frames with software graphics in 3 minutes and 52 seconds. A direct no-save relaunch reached 540 frames and preserved the runner hash. The launcher directory still contained only `TocaRecomp.exe`, and setup created no duplicate ISO. An invalid ISO returned exit code `2` without creating a backend or memory card. A direct launch before setup returned exit code `3` without creating setup or player data directories. The evidence is in `local/bracketed-setup-qa/guest-final/`.
+
+A separate direct launch used a copy of the saved Sprintcar profile and `keys.ini` in another bracketed data directory. It replayed the recorded profile load through frame 3120 with 341 card reads and zero writes or erases. The memory card, settings, and prepared runner retained their SHA-256 hashes. The original profile and settings also retained their hashes on the host.
+
+The same runner also verified and launched the reference DVD CHD and extracted disc directory from read-only mappings. Each direct no-save launch reached 540 frames with the same runner hash. These launches created no memory card.
 
 ### Verify an in-place update and reinstall
 

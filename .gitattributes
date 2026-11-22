@@ -1,0 +1,2 @@
+# Preserve patch context across Windows and Unix checkouts.
+patches/*.patch text eol=lf whitespace=-blank-at-eol

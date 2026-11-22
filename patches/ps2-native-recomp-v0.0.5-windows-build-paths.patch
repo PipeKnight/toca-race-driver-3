@@ -1,0 +1,94 @@
+diff --git a/scripts/port.sh b/scripts/port.sh
+--- a/scripts/port.sh
++++ b/scripts/port.sh
+@@ -4,7 +4,8 @@ if [ -z "${BASH_VERSION:-}" ] || [ "${BASH_VERSINFO:-0}" -lt 4 ]; then
+   echo "this script needs bash 4 or newer, this is ${BASH_VERSION:-not bash} (macOS: brew install bash, then run it again)" >&2; exit 1
+ fi
+ set -euo pipefail
+-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
++# MinGit can leave POSIX paths containing brackets unconverted for native tools.
++ROOT="$(cd "$(dirname "$0")/.." && (pwd -W 2>/dev/null || pwd))"
+ here="$ROOT/scripts"
+ 
+ usage() {
+@@ -100,7 +101,7 @@ if [ -n "$dvd_mode" ] || [ -n "${PS2_LIBCHDR_DIR:-}" ]; then
+   [ "$web" = 0 ] || { echo "DVD CHD and extracted-folder setup require --native-only" >&2; exit 2; }
+   if [ -n "${PS2_LIBCHDR_DIR:-}" ]; then
+     [ -f "$PS2_LIBCHDR_DIR/CMakeLists.txt" ] || { echo "PS2_LIBCHDR_DIR must name the libchdr source directory" >&2; exit 2; }
+-    dvd_flags=(-DPS2_LIBCHDR_DIR="$(cd "$PS2_LIBCHDR_DIR" && pwd)")
++    dvd_flags=(-DPS2_LIBCHDR_DIR="$(cd "$PS2_LIBCHDR_DIR" && (pwd -W 2>/dev/null || pwd))")
+     if [ "$windows" = 1 ] && [ -z "${CC:-}" ]; then
+       clang_c=$(command -v clang.exe) || { echo "Set CC to the C compiler paired with the Windows clang++ toolchain" >&2; exit 2; }
+       dvd_flags+=(-DCMAKE_C_COMPILER="$clang_c")
+diff --git a/scripts/setup.sh b/scripts/setup.sh
+--- a/scripts/setup.sh
++++ b/scripts/setup.sh
+@@ -4,7 +4,7 @@ if [ -z "${BASH_VERSION:-}" ] || [ "${BASH_VERSINFO:-0}" -lt 4 ]; then
+   echo "this script needs bash 4 or newer, this is ${BASH_VERSION:-not bash} (macOS: brew install bash, then run it again)" >&2; exit 1
+ fi
+ set -euo pipefail
+-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
++ROOT="$(cd "$(dirname "$0")/.." && (pwd -W 2>/dev/null || pwd))"
+ EMSDK="${EMSDK:-$ROOT/tools/emsdk}"
+ EMSDK_VERSION="6.0.11"
+ web=1
+diff --git a/scripts/fetch_wgpu.sh b/scripts/fetch_wgpu.sh
+--- a/scripts/fetch_wgpu.sh
++++ b/scripts/fetch_wgpu.sh
+@@ -5,7 +5,7 @@ set -e
+ pinned=v29.0.1.1
+ version=${1:-$pinned}
+ sha256=${2:-}
+-here=$(cd "$(dirname "$0")/.." && pwd)
++here=$(cd "$(dirname "$0")/.." && (pwd -W 2>/dev/null || pwd))
+ target="$here/third_party/wgpu-native"
+ os=$(uname -s | sed "s/Darwin/macos/;s/Linux/linux/;s/MINGW.*/windows/;s/MSYS.*/windows/")
+ arch=$(uname -m | sed "s/arm64/aarch64/")
+diff --git a/scripts/fetch_sdl2.sh b/scripts/fetch_sdl2.sh
+--- a/scripts/fetch_sdl2.sh
++++ b/scripts/fetch_sdl2.sh
+@@ -8,7 +8,7 @@ sha256=${2:-}
+ # from the release page (GitHub's digest for the file), checked by downloading it on 2026-10-31
+ [ -n "$sha256" ] || [ "$version" != "$pinned" ] || sha256=f15cff5fca62ec9381a016ef1d42a95c638cd72d2f226ba5781c76fe43dbd1ac
+ [ -n "$sha256" ] || { echo "SDL2: no SHA-256 known for $version: pass it as the second argument" >&2; exit 1; }
+-here=$(cd "$(dirname "$0")/.." && pwd)
++here=$(cd "$(dirname "$0")/.." && (pwd -W 2>/dev/null || pwd))
+ target="$here/third_party/sdl2"
+ mkdir -p "$target"
+ url="https://github.com/libsdl-org/SDL/releases/download/release-$version/SDL2-devel-$version-mingw.zip"
+diff --git a/scripts/fetch_dxc.sh b/scripts/fetch_dxc.sh
+--- a/scripts/fetch_dxc.sh
++++ b/scripts/fetch_dxc.sh
+@@ -7,7 +7,7 @@ set -e
+ version=${1:-v1.9.2609}
+ file=${2:-dxc_2026_09_29.zip}
+ sha256=${3:-ad31b1fc8443175d204f77a611fdb3ef2ec42759bdc2f1167368de24a4a7e7f1}
+-here=$(cd "$(dirname "$0")/.." && pwd)
++here=$(cd "$(dirname "$0")/.." && (pwd -W 2>/dev/null || pwd))
+ target="$here/third_party/dxc"
+ mkdir -p "$target"
+ # fetch_download retries, and uses a file saved by hand in downloads/ (scripts/fetch_lib.sh, docs/fetch-retry.md).
+diff --git a/scripts/cxx.sh b/scripts/cxx.sh
+--- a/scripts/cxx.sh
++++ b/scripts/cxx.sh
+@@ -22,6 +22,7 @@ if [ -n "$cached_cxx" ] && [ "$cached_probe" = clang-vector ] && [ "$cached_env" =
+   cxx_stamp=$cached_stamp
+ else
+   cxx_probe=$(mktemp -d)
++  cxx_probe=$(cd "$cxx_probe" && (pwd -W 2>/dev/null || pwd))
+   cat > "$cxx_probe/t.cpp" << 'PROBE'
+ #ifndef __clang__
+ #error not clang
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -337,7 +337,8 @@ if(NOT EMSCRIPTEN)
+ endif()
+ 
+ if(PS2_GENERATED)
+-    file(GLOB PS2_UNITS CONFIGURE_DEPENDS "${PS2_GENERATED}/*.cpp")
++    string(REGEX REPLACE "([][])" "[\\1]" generated_glob "${PS2_GENERATED}")
++    file(GLOB PS2_UNITS CONFIGURE_DEPENDS "${generated_glob}/*.cpp")
+     add_library(ps2game STATIC ${PS2_UNITS})
+     # a unit that crashed the compiler is built with lower optimisation (scripts/build_units.sh); no list, no change
+     include("${CMAKE_SOURCE_DIR}/cmake/lowopt.cmake")
