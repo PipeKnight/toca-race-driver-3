@@ -66,6 +66,8 @@ The fully patched runner opened a WSLg window using Vulkan through llvmpipe and 
 
 An earlier WSLg run created Player One on a fresh memory card with the SDL virtual controller. Its extended windowed reload reached the profile confirmation before the time limit. The fully patched runner cold-loaded a copy of that card, confirmed the profile load, and reached the Oschersleben race in headless frame capture with the CPU renderer. It exited at 3,850 frames with zero card writes and the same card SHA-256.
 
-After a rebuild, the verified ELF was copied into the project workspace. The same executable also opened the DVD CHD and the extracted disc directory in WSLg. Both runs reached 780 frames with zero audio queue underruns or dropped samples. Full-volume digest verification in WSL remains pending after the 180-second CHD streaming check timed out.
+After a rebuild, the verified ELF was copied into the project workspace. The same executable also opened the DVD CHD and the extracted disc directory in WSLg. Both runs reached 780 frames with zero audio queue underruns or dropped samples.
+
+The Linux runner streamed the complete decoded CHD and extracted disc directory into `sha256sum`. The CHD matched the reference ISO digest. The directory matched the reference virtual DVD digest. The CHD took 29 seconds on the WSL2 Linux filesystem. An earlier pass from the mounted Windows drive was stopped after about five minutes of filesystem reads. The extracted directory took 2 minutes and 38 seconds from the mounted Windows drive. Both successful runs streamed their outputs directly to the hash tool. [Reference disc digests](ps2-disc-and-archives.md#reference-disc)
 
 The build and launch evidence is in `local/linux-qa/`. Hardware rendering, physical input, clean SteamOS or Bazzite installation, and the AppImage and `.tar.gz` packages remain open in the [acceptance checklist](acceptance-checklist.md#3-packaging-and-platform-support).
