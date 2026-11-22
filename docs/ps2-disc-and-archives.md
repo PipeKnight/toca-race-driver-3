@@ -116,6 +116,28 @@ java scripts/InspectDisc.java F:/ --bigf 1 522960 328064 osc1.tra
 
 RD3_BD7sTools documents PSP `.p3d` input and PC `.px` output. The inspected upstream `Convert()` method is empty, so there is currently no conversion result to compare with the PS2 sample. The separate `car.p3d` code reference gives a candidate for a later model-format check. [RD3_BD7sTools README](https://github.com/BuilderDemo7/RD3_BD7sTools/blob/master/README.md) · [Converter source](https://github.com/BuilderDemo7/RD3_BD7sTools/blob/master/RD3_p3d2px/Program.cs#L45-L48)
 
+### Car and track import references
+
+The supplied `RaceDriverP3D_zm2_src.zip` contains the Win32 ZModeler 2 filter source. Its importer accepts Race Driver 3 `.p3d` version 2 and handles model nodes, meshes, vertex streams, materials, textures, and `part.map`. The archive identifies the source as proprietary Zanoza Software code. It serves as a reference for the desktop workflow. The attached forum download returned HTTP 403, so these observations come from the supplied local ZIP. [ZModeler discussion](https://www.forumzmodeler.com/viewtopic.php?t=13551&start=50)
+
+MarekRD3's video shows a Peugeot 205, identified by the uploader as a model from Colin McRae: DiRT, being driven in Race Driver 3. The clip supplies an example of a running car mod. Its page gives no import steps or PS2 build details. [Peugeot import demo](https://www.youtube.com/watch?v=qCG6Z6cZXFk)
+
+On the reference PS2 ELF, the vehicle-resource function has a `car.p3d` selector and also selects `part.map`, `tex.big`, `dmg.ini`, and other companion resources. The nested member lookup handles both `BIGF` and `JPAK` directories. A direct search across the three raw `.HUG` archives found no literal null-terminated `car.p3d` name.
+
+Track conversion needs both the visual resources and the physics and race data. The 14-member PS2 Oschersleben `TRACK.BIG` inspected above contains no `.px` or `.p3d` member. Trace the separate `TrackObj.big` and collision loads before assigning any PC format to the PS2 build. Nenkai's `col.col` template uses Mac debug symbols, and LFGamer2004's track conversion notes cover collision, render meshes, and AI data as separate formats. These are comparison references for the local PS2 samples. [Collision template](https://github.com/Nenkai/010GameTemplates/blob/main/Codemasters/Race_Driver_3/HeightData_col.col.bt) · [Track conversion notes](https://github.com/LFGamer2004/ToCA-Race-Driver-3-Modding-Track-Conversion-Tools)
+
+### Stock PS2 DTM models and Oschersleben collision
+
+The stock Oschersleben DTM race opened `CARDATA\DTMX\DTMX.JPK` from `RDH_2.HUG` sector 187552 and reached guest frame 3720. Its 57 outer entries contain separate `.mdl` and `.msh` files for the Audi A4, Mercedes C-Class, and Vectra. The 225 inspected nested `BIGF` members contain no `.p3d` file. The runtime probe did not capture a model from the `car.p3d` selector in this race. The extracted Audi A4 files start with little-endian words `0x00bd0b78` and `0x30000000`, respectively. The ZModeler filter expects a version word of `2` followed by its own model offsets and vertex-stream table. This makes the PS2 model pair a separate reader and writer target. A disc-wide scan found 64 sector-aligned JPAKs with `CarParts.big` and matching `.mdl`/`.msh` names. The scan checked 98 model pairs and 6,904 nested `BIGF` entries in those packs and found no `.p3d` member. The extracted assets, scan report, and trace remain under `local/asset-import-trace/`.
+
+All 22 DTM `part.map` files match the outer structure read by ZModeler: version `1`, five LODs, 320 entries per LOD, and a 6,412-byte file. This identifies reusable serialization for the part map. Whether the indices retain the same meaning with a converted model needs to be tested with the PS2 mesh.
+
+The track trace opened `TRACKS\OSC1\SUN\TRACK.JPK` at `RDH_1.HUG` sector 516992, `DMA.JPK` at sector 517680, and `TRACK.BIG` at sector 522960. `TRACK.JPK` includes the `col.col` collision mesh and the nested `osc1.big` package with `osc1.ail` and `.aib` entries. An independent LZSS decoder recovered `lights.ini` byte for byte against the `TRACK.BIG` copy. It also recovered `rumblehigh.px`, whose header begins with `PS2M`, version 3.
+
+The decoded `col.col` matches the header and array layout in Nenkai's template. It contains 12,565 vertices, 18,670 triangles, 320,500 bytes of cell data, and an 8,192-byte trailer. All triangle indices are within the vertex array. At guest address `0x0131b6c0`, the running game retained the same vertex data, triangle indices, and cell data byte for byte. These verified structures can guide a PS2 collision importer. [Collision template](https://github.com/Nenkai/010GameTemplates/blob/main/Codemasters/Race_Driver_3/HeightData_col.col.bt)
+
+At `0x001e29b8`, the object loader checks whether a track JPAK is already available. It opens `TrackObj.big` through `0x00380ff0` on the fallback branch. With a JPAK available, it resolves object members through `0x001e94b8`, which passes the member to the JPAK lookup and unpacker. The normal Oschersleben trace observed the JPAK reads and no `TrackObj.big` open. The PS2 import test should target the observed package route first.
+
 ### Resource replacement and new track slots
 
 The reference ISO places `RDH_1.HUG` at logical block 773,120. Adding the archive-relative sector 522,960 places `TRACK.BIG` at ISO byte `0x9e368000`. The 8,328-byte `osc1.tra` member starts at ISO byte `0x9e3add80`. A read directly from the ISO matched the mounted-volume inspector's SHA-256 for both the package and the member. These offsets are specific to this disc layout.
