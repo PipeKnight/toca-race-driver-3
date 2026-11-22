@@ -4,11 +4,14 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.Linq;
+using System.Reflection;
 using System.Text;
 
 internal static class TocaRecomp
 {
-    private const string Version = "0.1.0-preview.1";
+    private const string Version = "0.1.0-preview.2";
+    private const string SupportPrefix = "support/";
 
     private const string Usage =
         "Usage: TocaRecomp.exe --disc PATH [--data-dir PATH] [--setup-dir PATH]\n" +
@@ -59,6 +62,11 @@ internal static class TocaRecomp
             Console.Error.WriteLine("Could not access the launcher files. " + error.Message);
             return 3;
         }
+        catch (UnauthorizedAccessException error)
+        {
+            Console.Error.WriteLine("Could not access the launcher files. " + error.Message);
+            return 3;
+        }
     }
 
     private static int Launch(string[] args)
@@ -100,9 +108,12 @@ internal static class TocaRecomp
         if (disc == null) throw new ArgumentException("Provide your disc path with --disc.");
         if (direct && setupOnly) throw new ArgumentException("Choose either --direct or --setup-only.");
         if (setup == null) setup = Path.Combine(data, "setup");
+        if (!File.Exists(disc) && !Directory.Exists(disc))
+            throw new ArgumentException("Disc source does not exist: " + disc);
+        if (direct && !Directory.Exists(setup))
+            throw new IOException("This build is not prepared. Run once without --direct to set up the game.");
 
-        string support = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "support", "Launch-Windows.ps1");
-        if (!File.Exists(support)) throw new IOException("Missing support\\Launch-Windows.ps1 next to the launcher.");
+        string support = PrepareSupport(data);
         var command = new List<string> {
             "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", support,
             "-Disc", disc, "-DataDirectory", data, "-SetupDirectory", setup
@@ -126,6 +137,77 @@ internal static class TocaRecomp
             helper.WaitForExit();
             return helper.ExitCode;
         }
+    }
+
+    private static string PrepareSupport(string data)
+    {
+        Assembly launcher = typeof(TocaRecomp).Assembly;
+        string[] resources = launcher.GetManifestResourceNames();
+        string entry = SupportPrefix + "Launch-Windows.ps1";
+        if (!resources.Contains(entry, StringComparer.Ordinal))
+            throw new IOException("The embedded setup script is missing.");
+
+        // Different builds can use the same data directory without replacing each other's setup files.
+        string directory = Path.Combine(data, ".launcher", launcher.ManifestModule.ModuleVersionId.ToString("N"));
+        foreach (string name in resources.Where(name => name.StartsWith(SupportPrefix, StringComparison.Ordinal)))
+        {
+            string relative = name.Substring(SupportPrefix.Length).Replace('/', Path.DirectorySeparatorChar);
+            string file = Path.Combine(directory, relative);
+            using (Stream resource = launcher.GetManifestResourceStream(name))
+            using (var contents = new MemoryStream())
+            {
+                resource.CopyTo(contents);
+                WriteSupportFile(file, contents.ToArray());
+            }
+        }
+        return Path.Combine(directory, "Launch-Windows.ps1");
+    }
+
+    private static void WriteSupportFile(string file, byte[] contents)
+    {
+        if (MatchesSupportFile(file, contents)) return;
+
+        Directory.CreateDirectory(Path.GetDirectoryName(file));
+        string temporary = file + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            File.WriteAllBytes(temporary, contents);
+            if (File.Exists(file))
+                File.Replace(temporary, file, null, true);
+            else
+                File.Move(temporary, file);
+        }
+        catch (IOException)
+        {
+            // Another launch may have published the same complete file while this copy was being written.
+            if (!MatchesSupportFile(file, contents)) throw;
+        }
+        finally
+        {
+            File.Delete(temporary);
+        }
+    }
+
+    private static bool MatchesSupportFile(string file, byte[] contents)
+    {
+        try
+        {
+            using (var saved = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete))
+            {
+                if (saved.Length != contents.Length) return false;
+                byte[] bytes = new byte[contents.Length];
+                int offset = 0;
+                while (offset < bytes.Length)
+                {
+                    int read = saved.Read(bytes, offset, bytes.Length - offset);
+                    if (read == 0) return false;
+                    offset += read;
+                }
+                return bytes.SequenceEqual(contents);
+            }
+        }
+        catch (FileNotFoundException) { return false; }
+        catch (DirectoryNotFoundException) { return false; }
     }
 
     private static string ReadPath(string[] args, ref int index)

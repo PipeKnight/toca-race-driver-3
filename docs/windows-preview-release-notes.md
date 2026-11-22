@@ -1,10 +1,10 @@
 # TOCA Race Driver 3 Recompilation for Windows 11 x64
 
-Version `0.1.0-preview.1` is a development preview for the North American PS2 disc `SLUS-21182` v1.02. Use a disc image from your own copy. The launcher compiles the original executable locally and reads the original disc at runtime. A PS2 BIOS and PCSX2 are unnecessary.
+Version `0.1.0-preview.2` is a development preview for the North American PS2 disc `SLUS-21182` v1.02. Use a disc image from your own copy. The launcher compiles the original executable locally and reads the original disc at runtime. A PS2 BIOS and PCSX2 are unnecessary.
 
 ## First launch
 
-Extract the entire archive into a writable folder. Leave the `support` folder next to `TocaRecomp.exe`. Open PowerShell in that folder and pass the path to your ISO.
+Place `TocaRecomp.exe` in a writable folder. The executable bundles its setup files. Open PowerShell in that folder and pass the path to your ISO.
 
 ```powershell
 .\TocaRecomp.exe --disc 'D:\Games\TOCA Race Driver 3.iso'
@@ -16,7 +16,7 @@ A matching DVD CHD or folder of extracted disc files can also launch a prepared 
 
 ## Saves and updates
 
-The launcher folder holds the memory card `toca-slus-21182.ps2` and game settings unless you select another data folder with `--data-dir`. The card stores normal game progression. Keep it and your settings before removing a portable installation. After replacing the launcher and its support files, run once without `--direct` so the launcher can prepare the updated runner.
+The launcher folder holds the memory card `toca-slus-21182.ps2` and game settings unless you select another data folder with `--data-dir`. To upgrade from `0.1.0-preview.1`, replace `TocaRecomp.exe` after the game closes, or pass your previous data folder with `--data-dir`. Keep using your previous `--setup-dir` if you chose a separate one. Run once without `--direct` so the launcher can prepare any required files. Keep your memory card and settings before removing a portable installation.
 
 ## Verification scope
 

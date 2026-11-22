@@ -1,8 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$Destination,
-    [string]$ArchiveCache,
-    [string]$ArchivePath
+    [string]$ArchiveCache
 )
 
 $ErrorActionPreference = 'Stop'
@@ -15,13 +14,8 @@ if (!(Test-Path -LiteralPath $compiler -PathType Leaf)) { throw 'The Windows .NE
 
 $destinationPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Destination)
 $cachePath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($ArchiveCache)
-$zipPath = if ($ArchivePath) { $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($ArchivePath) }
-if ($zipPath -and (Test-Path -LiteralPath $zipPath)) { throw "Package archive already exists: $zipPath" }
-$support = Join-Path $destinationPath 'support'
-$entries = @('TocaRecomp.exe', 'README.md')
-foreach ($directory in $cachePath, (Join-Path $support 'sources'), (Join-Path $support 'patches')) {
-    [void][IO.Directory]::CreateDirectory($directory)
-}
+[void][IO.Directory]::CreateDirectory($cachePath)
+$resources = [ordered]@{}
 
 foreach ($source in $sources.Backend, $sources.Chd) {
     $archive = Join-Path $cachePath $source.File
@@ -40,47 +34,46 @@ foreach ($source in $sources.Backend, $sources.Chd) {
     if ((Get-FileHash -LiteralPath $archive).Hash -ne $source.SHA256) {
         throw "Cached source checksum mismatch for $($source.File)."
     }
-    Copy-Item -LiteralPath $archive -Destination (Join-Path $support 'sources') -Force
-    $entries += "support/sources/$($source.File)"
+    $resources["support/sources/$($source.File)"] = $archive
 }
 
 foreach ($name in 'Launch-Windows.ps1', 'Play-RecompiledToca.ps1', 'WindowsPreviewSources.psd1') {
-    Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination $support -Force
-    $entries += "support/$name"
+    $resources["support/$name"] = Join-Path $PSScriptRoot $name
 }
 foreach ($name in @($sources.Patches) + 'LICENSE') {
-    Copy-Item -LiteralPath (Join-Path $root "patches\$name") -Destination (Join-Path $support 'patches') -Force
-    $entries += "support/patches/$name"
+    $resources["support/patches/$name"] = Join-Path $root "patches\$name"
 }
+$resources['support/README.md'] = Join-Path $root 'docs\windows-preview-release-notes.md'
 
-Copy-Item -LiteralPath (Join-Path $root 'docs\windows-preview-release-notes.md') -Destination (Join-Path $destinationPath 'README.md') -Force
+[void][IO.Directory]::CreateDirectory($destinationPath)
 $exe = Join-Path $destinationPath 'TocaRecomp.exe'
-& $compiler /nologo /optimize+ /target:exe /platform:x64 "/out:$exe" (Join-Path $PSScriptRoot 'TocaRecomp.cs')
-if ($LASTEXITCODE -ne 0) { throw "Could not build the Windows launcher (exit code $LASTEXITCODE)." }
-Write-Host "Windows preview package built in $destinationPath"
-
-if ($zipPath) {
-    Add-Type -AssemblyName System.IO.Compression
-    Add-Type -AssemblyName System.IO.Compression.FileSystem
-    [void][IO.Directory]::CreateDirectory((Split-Path -Parent $zipPath))
-    $stagedZip = "$zipPath.$([Guid]::NewGuid().ToString('N')).part"
-    try {
-        $file = [IO.File]::Open($stagedZip, 'CreateNew', 'Write', 'None')
-        try {
-            $zip = [IO.Compression.ZipArchive]::new($file, [IO.Compression.ZipArchiveMode]::Create, $true)
-            try {
-                foreach ($entry in $entries) {
-                    [void][IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, (Join-Path $destinationPath $entry), $entry)
-                }
-            } finally {
-                $zip.Dispose()
-            }
-        } finally {
-            $file.Dispose()
-        }
-        [IO.File]::Move($stagedZip, $zipPath)
-    } finally {
-        if (Test-Path -LiteralPath $stagedZip -PathType Leaf) { Remove-Item -LiteralPath $stagedZip -Force }
-    }
-    Write-Host "Windows preview archive created at $zipPath"
+$stage = Join-Path $destinationPath ('.TocaRecomp-' + [Guid]::NewGuid().ToString('N'))
+$response = "$stage.rsp"
+$stagedExe = "$stage.exe"
+$options = @('/nologo', '/optimize+', '/target:exe', '/platform:x64', "/out:`"$stagedExe`"")
+foreach ($resource in $resources.GetEnumerator()) {
+    $options += "/resource:`"$($resource.Value)`",$($resource.Key),private"
 }
+$options += '"' + (Join-Path $PSScriptRoot 'TocaRecomp.cs') + '"'
+try {
+    [IO.File]::WriteAllLines($response, [string[]]$options, [Text.Encoding]::UTF8)
+    & $compiler "@$response"
+    if ($LASTEXITCODE -ne 0) { throw "Could not build the Windows launcher (exit code $LASTEXITCODE)." }
+    for ($attempt = 1; ; $attempt++) {
+        try {
+            if ([IO.File]::Exists($exe)) {
+                [IO.File]::Replace($stagedExe, $exe, [NullString]::Value, $true)
+            } else {
+                [IO.File]::Move($stagedExe, $exe)
+            }
+            break
+        } catch [IO.IOException] {
+            if ($attempt -ge 10 -or ![IO.File]::Exists($stagedExe)) { throw }
+            Start-Sleep -Milliseconds 200
+        }
+    }
+} finally {
+    [IO.File]::Delete($response)
+    [IO.File]::Delete($stagedExe)
+}
+Write-Host "Windows preview executable built at $exe"

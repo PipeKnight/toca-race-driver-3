@@ -4,6 +4,8 @@ The launcher packages the first-run setup for Windows 11 x64. Supply your own No
 
 The first limited public preview was published on November 22, 2026. Clean installation was verified in Windows Sandbox with software graphics. Full races on Direct3D 12 used recorded inputs on an existing Windows installation. [Windows x64 preview download](https://github.com/PipeKnight/toca-race-driver-3/releases/tag/v0.1.0-preview.1)
 
+For the published `0.1.0-preview.1` download, extract the archive and keep its `support` directory next to `TocaRecomp.exe`. The `0.1.0-preview.2` executable bundles those files and can be copied on its own.
+
 ## Build the package
 
 From the project directory, run this in PowerShell on Windows.
@@ -12,7 +14,7 @@ From the project directory, run this in PowerShell on Windows.
 .\scripts\New-WindowsPreview.ps1
 ```
 
-The default package directory is `build\windows-preview-x64`. Use `-Destination` to choose another directory and `-ArchiveCache` to choose where the build script keeps the two verified source archives. Use `-ArchivePath` to also create a ZIP containing the launcher, release notes, and the files listed in the package manifest. Copy the entire package directory to the test machine or extract the ZIP there. `TocaRecomp.exe` is the entry point and `support` contains its setup files.
+The default output is `build\windows-preview-x64\TocaRecomp.exe`. Use `-Destination` to choose another directory and `-ArchiveCache` to choose where the build script keeps the two verified source archives. Copy `TocaRecomp.exe` to the test machine. It includes the setup scripts, patches, upstream source archives, license notice, and release notes.
 
 ## Set up and run the game
 
@@ -24,6 +26,8 @@ From the package directory, run the launcher with the path to your disc.
 
 The first launch fetches and verifies the portable compiler and graphics dependencies, extracts the boot ELF, builds the runner, and starts the game. It needs an internet connection until the dependencies have been cached. For an offline first setup, place the upstream dependency archives under `downloads` inside the setup directory. Use the filenames in [WindowsPreviewSources.psd1](../scripts/WindowsPreviewSources.psd1). The upstream setup verifies these archives against its pinned checksums.
 
+Use a setup directory without square brackets for an offline first launch. The bundled checksum tool could not open a dependency archive under a setup path containing brackets. The verified configuration used a separate data directory with brackets and a setup directory with spaces.
+
 After setup, the same command runs the local build. Use `--direct` to require an existing build, or `--setup-only` to prepare the build without starting the game. `--help` lists all switches. For example, this command stores game data and build files in separate directories and starts fullscreen.
 
 ```powershell
@@ -31,15 +35,15 @@ After setup, the same command runs the local build. Use `--direct` to require an
     --data-dir 'D:\TOCA\Player Data' --setup-dir 'D:\TOCA\Setup' --fullscreen
 ```
 
-The data directory defaults to the launcher directory and holds `toca-slus-21182.ps2`, controller settings, runtime caches, and logs. The setup directory defaults to `setup` inside the data directory. After the game closes, preserve the memory card and settings before removing a portable copy. Be sure to include the separately selected data directory if you used `--data-dir`.
+The data directory defaults to the launcher directory and holds `toca-slus-21182.ps2`, controller settings, runtime caches, and logs. The launcher writes its bundled support files to a build-specific directory under `.launcher` in the data directory. The setup directory defaults to `setup` inside the data directory. After the game closes, preserve the memory card and settings before removing a portable copy. Be sure to include the separately selected data directory if you used `--data-dir`.
 
-After updating the launcher package, run once without `--direct` to prepare the updated runtime. The [version 11 checkpoint format](native-recompilation.md#preserve-buffered-adpcm-end-flags-in-version-11-checkpoints) retains additional SPU2 state. To resume normal game progress, open the profile on the portable memory card.
+To upgrade from `0.1.0-preview.1`, close the game and replace `TocaRecomp.exe` in the previous launcher folder. To keep the new executable elsewhere, pass the previous data directory with `--data-dir`. If you chose a separate setup directory, keep passing its path with `--setup-dir`. Run once without `--direct` to prepare any required files. To resume normal game progress, open the existing profile on the portable memory card.
 
 The launcher returns exit code `2` for an invalid argument or unsupported disc and `3` for an incomplete setup or a build failure. It passes through the game process exit code after launch.
 
 ## Clean desktop release test
 
-Use a clean Windows 11 x64 installation with a working graphics driver, a physical keyboard, and an SDL-supported controller. Use the candidate ZIP and your own [reference disc](ps2-disc-and-archives.md#reference-disc). Run from a fresh writable directory with the default portable setup and data paths. Record the archive SHA-256, launcher version, Windows build, GPU and driver, and controller model.
+Use a clean Windows 11 x64 installation with a working graphics driver, a physical keyboard, and an SDL-supported controller. Use the candidate executable and your own [reference disc](ps2-disc-and-archives.md#reference-disc). Run from a fresh writable directory with the default portable setup and data paths. Record the executable SHA-256, launcher version, Windows build, GPU and driver, and controller model.
 
 1. With the keyboard, boot the candidate, navigate the menus, create a profile, and enable autosave. Verify the keyboard can steer, accelerate, and brake. Check the on-screen controls or the portable `keys.ini` for the key bindings.
 2. With the physical controller, start an event such as the first World Sprintcar Series round in Pro Career. Drive the full race from the grid, confirm Race Results, and continue until the game writes its autosave. Note any audible interruptions. The runtime log records the active graphics adapter, audio queue underruns, and card writes.
@@ -102,3 +106,11 @@ The same package reopened the card in fullscreen. The player won the first **Wor
 The Windows 11 vGPU guest reached its desktop and enumerated the RTX 4070, Intel UHD 770, and a Remote Desktop keyboard. The initial candidate built successfully from the original ISO. At startup the guest session stopped during graphics initialization, before the runner logged an active Direct3D 12 adapter or rendered a frame. A separate `D3D12CreateDevice` call for the default adapter in the guest's system session succeeded. A later guest prepared for the low-power FXC probe reached the system session without reaching interactive logon during the test. The physical controller test still requires an accessible device on an interactive clean Windows installation.
 
 Candidate evidence is under `local/release-preview-qa/`.
+
+### Single-executable preview candidate
+
+The Windows x64 `0.1.0-preview.2` candidate contains one `TocaRecomp.exe`. Its SHA-256 is `f5802e342950a2f673091cb97140ac7eaacc94de17d528c573aafc6a746246ff`. The executable contains 15 embedded support files. A rebuild in a directory with spaces and brackets produced only the executable. Two concurrent `--setup-only` checks published the same complete support files, and a later launch repaired a deliberately modified cached helper before running it.
+
+The standalone candidate launched from a folder holding a copy of an existing `0.1.0-preview.1` memory card and `keys.ini`. It reused the previous prepared setup and ran on the RTX 4070 through Direct3D 12. World Sprintcar Series standings showed **Player One** in first place with **150 points**. The runner reported 341 card reads and zero writes on normal window close. The original card, test copy, and settings retained their hashes. The card passed the filesystem and ECC check. A separate direct launch from a different working directory opened the same data through an explicit `--data-dir` and showed **Dirt Raceway 2 · Sunny** as the next session. Host migration logs are under `local/executable-preview-qa/`.
+
+A clean offline Windows 11 Sandbox on build `26100.9606` copied only the executable and reused verified dependency downloads. Its first launch built the runtime and reached 780 guest frames in 3 minutes and 44 seconds. A direct no-save launch reached 540 frames with the same runner hash. The executable folder still contained only `TocaRecomp.exe`. The unsupported short ISO returned exit code `2` and created no backend or memory card. `--direct` before setup returned exit code `3` and created neither setup nor data. These checks used software graphics and provide clean installation coverage. See `local/executable-preview-qa/guest-plain/` for the guest report and logs.
