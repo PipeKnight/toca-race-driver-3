@@ -59,6 +59,12 @@ Finish an event, wait for autosave, and close the game. Use `--direct --fullscre
 
 ## Verification
 
+### Windows preview 4 release
+
+The release executable SHA-256 is `84314c5f217af742f5ca95785f9ec9e8a5df5a57758c3b2c2e9362faec5baa2e`. In an offline Windows 11 Sandbox on build `26100.9606`, it prepared a fresh backend from the reference ISO and verified dependency archives. The software-rendered first launch reached frame 780, and a separate direct launch reached frame 540 with the same runner hash.
+
+The exact executable reopened a copy of a previous preview's Sprintcar profile and settings through frame 3120 with 341 card page reads and zero writes. The card, settings, and runner hashes were unchanged. A separate direct launch enabled all three imported tracks with the DTM overlay, selected `road-america-dtm.ps2`, and reached frame 150. The Sandbox evidence is under `local/release-preview-4/sandbox-verified/`. The [A1-Ring races](ps2-disc-and-archives.md#add-a1-ring-gp-and-short) used Direct3D 12 and recorded controller input on the existing Windows host.
+
 ### Windows preview 3 release
 
 The release executable SHA-256 is `0c238cd6f525f8ea5546b289f84b4382b8d04ebdc211d8f500fea9798ed20023`. In an offline Windows 11 Sandbox on build `26100.9606`, it prepared a fresh backend from the reference ISO and verified dependency archives. The launcher, setup, and player paths contained both spaces and square brackets. The initial software-rendered run reached frame 780 and a separate direct launch reached frame 540 with the same runner hash. Invalid disc input and a direct launch before setup returned the expected errors.

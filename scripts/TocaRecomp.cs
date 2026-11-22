@@ -10,7 +10,7 @@ using System.Text;
 
 internal static class TocaRecomp
 {
-    private const string Version = "0.1.0-preview.3";
+    private const string Version = "0.1.0-preview.4";
     private const string SupportPrefix = "support/";
 
     private const string Usage =

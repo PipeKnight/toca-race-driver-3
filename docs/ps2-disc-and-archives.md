@@ -213,7 +213,7 @@ The first geometry pass converted 13 of the 14 members for each layout. The rema
 
 Both donor routes have a 79-point pit route. The auxiliary route has 36 points for GP and 28 for Short, matching the lap-boundary checkpoint spans. Local conversion to RD3 `AILD` produced 22,100 bytes for GP and 11,092 bytes for Short. Both routes and their matching collision data fit in the reference `TRACK.JPK`.
 
-Two isolated Windows 11 Direct3D 12 runs tested the converted layouts separately through `tqa1`. The menu displayed A1-Ring GP at 2.7 miles and A1-Ring Short at 1.4 miles. Each pass loaded its donor `TRACK.JPK` and `DMA1.JPK`, rendered the pit straight, and reached about ten seconds of driving with AI cars on track. The loading screen still uses the Oschersleben companion assets. Full laps and separate permanent slots for the two layouts remain open. Local evidence is in `local/road-america-launch/a11/` and `local/road-america-launch/a12/`.
+Two isolated Windows 11 Direct3D 12 runs first tested the converted layouts through `tqa1` one at a time. The menu displayed A1-Ring GP at 2.7 miles and A1-Ring Short at 1.4 miles. Each pass loaded its donor `TRACK.JPK` and `DMA1.JPK`, rendered the pit straight, and reached about ten seconds of driving with AI cars on track. Local evidence is in `local/road-america-launch/a11/` and `local/road-america-launch/a12/`. Use the [expanded add-on](#add-a1-ring-gp-and-short) to select either layout alongside Road America.
 
 The sampled collision members have valid bounds and triangle indices within their vertex arrays when parsed with the Race Driver 3 collision layout. The configuration keys for A1-Ring Short and GP still need to be mapped to their display names. The read-only inventory and member-offset report are in `race-driver-2-packages.json` and `race-driver-2-track-formats.json` under `local/qa-circuit-drive/`.
 
@@ -279,3 +279,26 @@ The Windows 11 x64 candidate prepared a fresh backend from the portable executab
 A third Direct3D 12 run started from power-on with recorded input, selected Road America, and finished the one-lap race. Race Results showed Player One 20th in 3:06.68 without a penalty. Continuing through the finish triggered the autosave and wrote 772 pages to the isolated card. The resulting card passed filesystem and ECC checks. Another cold run loaded Player One from that card with 341 page reads and zero writes. The SHA-256 stayed unchanged. The autosave, result, and profile reload are captured in `finish/frames/frame_19550.png`, `finish/frames/frame_20297.png`, and `profile-reload/frames/frame_01840.png` under the local evidence directory.
 
 In **Time Trial**, the Autosport Clio Cup recorded a best lap of **2:47.56** on Road America. The portable backend replayed the full drive from power-on and matched all 1,513 checkpoints through the pause menu. Ending the Time Trial session triggered the autosave. On a cold launch, **Load** displayed Player One's 2:47.56 record for **Road America** in the Racing Clio alongside the original Dirt Raceway 1 ghost. The card passed filesystem and ECC checks. The cold run read 357 pages, wrote zero, and preserved the card hash. The evidence includes `time-trial-save/frames/frame_18800.png`, `time-trial-end-session/frames/frame_23720.png`, and `time-trial-cold/frames/frame_05625.png`.
+
+### Add A1-Ring GP and Short
+
+Build the Windows executable from a checkout with the A1-Ring patch and use the same two discs as for Road America. Create the expanded pack in a new directory. The four files produced without `--include-a1-ring` retain the original add-on format.
+
+```powershell
+python scripts/BuildRoadAmericaMod.py 'D:\Discs\RD3' 'F:\' 'D:\Mods\RD2 Circuits' --include-a1-ring
+.\TocaRecomp.exe --disc 'D:\Discs\TOCA Race Driver 3.iso' --road-america 'D:\Mods\RD2 Circuits'
+```
+
+Select **Free Race → Autosport Clio Cup**, then choose **A1-Ring GP** or **A1-Ring Short** in the track carousel. Both layouts use **Sunny** and currently borrow Oschersleben's loading-screen and companion resources. Road America and Oschersleben remain selectable. The launcher opens the same `road-america.ps2` card for both pack formats.
+
+| Track | RD2 package | RD3 slot | Record index | Resource folder |
+| --- | --- | --- | ---: | --- |
+| Road America | `roa` | `tqa1` | 19 | Pack root |
+| A1-Ring GP | `a11` | `tqa2` | 34 | `tqa2` |
+| A1-Ring Short | `a12` | `tqa3` | 35 | `tqa3` |
+
+The pack root holds both catalogs. Each resource folder holds its own `TRACK.JPK` for collision and AI routes and `DMA1.JPK` for geometry. The importer preserves the original track records and adds two Clio Cup calendar rounds. Windows 11 Direct3D 12 tests reached the grid in all four courses. The runtime used the corresponding converted pair for each of the three imports and the original disc files for Oschersleben. A separate run loaded the original four-file Road America pack.
+
+Recorded controller inputs drove both Sunny Clio Cup races from power-on to the finish menu on an RTX 4070. The GP and Short finish captures are `gp-final/frames/frame_18000.png` and `short-final/frames/frame_13500.png` under `local/a1-ring-pack/`.
+
+The release backend replayed the driving inputs from the grid with no checkpoint differences (688 on GP and 388 on Short). Continuing after the finish autosaved each race. The game wrote 772 memory-card pages in each test. Race Results classified Player One 16th of 20 in **2:18.43** on GP and **1:17.73** on Short. Both cards passed the filesystem and ECC checks. Separate cold launches displayed **Load Successful** with 341 page reads and zero writes per card and preserved both hashes. Find the results, autosave, and reload captures under `gp-results/`, `short-results/`, `gp-reload/`, and `short-reload/`.

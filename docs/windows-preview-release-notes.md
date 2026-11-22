@@ -1,15 +1,13 @@
 # TOCA Race Driver 3 Recompilation for Windows 11 x64
 
-Version `0.1.0-preview.3` is a development preview for the North American PS2 disc `SLUS-21182` v1.02. Use a disc image from your own copy. The launcher compiles the original executable locally and reads the original disc at runtime. A PS2 BIOS and PCSX2 are unnecessary.
+Version `0.1.0-preview.4` is a development preview for the North American PS2 disc `SLUS-21182` v1.02. Use a disc image from your own copy. The launcher compiles the original executable locally and reads the original disc at runtime. A PS2 BIOS and PCSX2 are unnecessary.
 
 ## Changes in this preview
 
-- First-run setup supports Windows paths with spaces and square brackets.
-- `--road-america PATH` loads a locally built Road America add-on from your Race Driver 2 and TOCA Race Driver 3 discs. Choose Sunny in Autosport Clio Cup.
-- `--dtm-mod PATH` loads a local DTM car package or Mercedes C-Class high-detail mesh. The project includes tools for inspecting, exporting, and editing the supported PS2 assets.
-- Stock play uses its existing portable memory card. The Road America, DTM, and combined options each select their own card.
+- Build the optional circuit pack with `--include-a1-ring` to add A1-Ring GP and Short alongside Road America. Choose Sunny in Autosport Clio Cup. Both A1-Ring layouts use Oschersleben's loading-screen assets.
+- Use the same `--road-america PATH` option and existing add-on memory card with either pack format. The launcher still accepts the original four-file Road America pack and the separate `--dtm-mod PATH` option.
 
-Build the add-ons from your own files. [PS2 modding guide](https://github.com/PipeKnight/toca-race-driver-3/blob/main/docs/modding.md) · [DTM model guide](https://github.com/PipeKnight/toca-race-driver-3/blob/main/docs/ps2-dtm-models.md)
+Build the add-ons from your own files. [Circuit pack instructions](https://github.com/PipeKnight/toca-race-driver-3/blob/main/docs/ps2-disc-and-archives.md#add-a1-ring-gp-and-short) · [DTM model guide](https://github.com/PipeKnight/toca-race-driver-3/blob/main/docs/ps2-dtm-models.md)
 
 ## First launch
 

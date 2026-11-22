@@ -1,0 +1,175 @@
+--- a/runtime/src/disc.cpp
++++ b/runtime/src/disc.cpp
+@@ -56,14 +56,41 @@
+     RoadAmericaMember{"DMA1.JPK", 519440, 3590336, "JPAK", 14},
+ };
+ 
++constexpr std::array imported_track_ids{"TQA1", "TQA2", "TQA3"};
++constexpr std::array imported_track_folders{"", "tqa2", "tqa3"};
++
+ struct RoadAmerica {
+     std::uint32_t archive_sector = 0;
+-    std::array<std::vector<std::uint8_t>, road_america_members.size()> data;
+-    std::atomic_uint track_members{0};
++    unsigned courses = 1;
++    std::array<std::vector<std::uint8_t>, 2> catalogs;
++    std::array<std::array<std::vector<std::uint8_t>, 2>, imported_track_ids.size()> packages;
++    // One selection per reference resource. Zero keeps the stock Oschersleben read.
++    std::array<std::atomic_uint, 2> selected{};
+ };
+ 
+ std::unique_ptr<RoadAmerica> g_road_america;
+ std::string g_road_america_directory;
++
++bool load_track_overlay(const std::filesystem::path &folder, std::size_t index, std::vector<std::uint8_t> &data) {
++    const auto &member = road_america_members[index];
++    const auto filename = os::utf8(folder / member.name);
++    std::FILE *file = os::open(filename, "rb");
++    if (!file) {
++        std::fprintf(stderr, "[road-america] could not open %s\n", filename.c_str());
++        return false;
++    }
++    data.resize(member.bytes);
++    const auto size = std::fread(data.data(), 1, data.size(), file);
++    const bool complete = std::fgetc(file) == EOF && !std::ferror(file);
++    std::fclose(file);
++    const auto count = u32(data.data() + (index < 2 ? 4 : 8));
++    if (size != data.size() || !complete || std::memcmp(data.data(), member.magic, 4) != 0 ||
++        (count != member.entries && !(index == 0 && count == 83))) {
++        std::fprintf(stderr, "[road-america] invalid add-on member %s\n", filename.c_str());
++        return false;
++    }
++    return true;
++}
+ 
+ bool prepare_road_america() {
+     const auto &folder = g_road_america_directory;
+@@ -75,27 +102,19 @@
+     }
+     auto mod = std::make_unique<RoadAmerica>();
+     mod->archive_sector = archive->sector;
+-    for (std::size_t i = 0; i < road_america_members.size(); ++i) {
+-        const auto &member = road_america_members[i];
+-        const auto filename = os::utf8(os::path(folder) / member.name);
+-        std::FILE *file = os::open(filename, "rb");
+-        if (!file) {
+-            std::fprintf(stderr, "[road-america] could not open %s\n", filename.c_str());
+-            return false;
+-        }
+-        auto &data = mod->data[i];
+-        data.resize(member.bytes);
+-        const auto size = std::fread(data.data(), 1, data.size(), file);
+-        const bool complete = std::fgetc(file) == EOF && !std::ferror(file);
+-        std::fclose(file);
+-        if (size != data.size() || !complete || std::memcmp(data.data(), member.magic, 4) != 0 ||
+-            u32(data.data() + (i < 2 ? 4 : 8)) != member.entries) {
+-            std::fprintf(stderr, "[road-america] invalid add-on member %s\n", filename.c_str());
+-            return false;
+-        }
+-    }
++    const auto root = os::path(folder);
++    for (std::size_t i = 0; i < mod->catalogs.size(); ++i) {
++        if (!load_track_overlay(root, i, mod->catalogs[i])) return false;
++    }
++    if (u32(mod->catalogs[0].data() + 4) == 83) mod->courses = 3;
++    for (unsigned course = 0; course < mod->courses; ++course) {
++        const auto resources = course == 0 ? root : root / imported_track_folders[course];
++        for (std::size_t i = 0; i < mod->packages[course].size(); ++i) {
++            if (!load_track_overlay(resources, i + 2, mod->packages[course][i])) return false;
++        }
++    }
++    std::fprintf(stderr, "[road-america] enabled (%u imported tracks)\n", mod->courses);
+     g_road_america = std::move(mod);
+-    std::fprintf(stderr, "[road-america] enabled\n");
+     return true;
+ }
+ 
+@@ -210,14 +229,18 @@
+ void apply_road_america(std::uint32_t sector, void *out, std::size_t got) {
+     if (!g_road_america) return;
+     const auto &mod = *g_road_america;
+-    const auto active = mod.track_members.load();
+     const std::uint64_t start = std::uint64_t{sector} * kSector;
+-    for (std::size_t i = 0; i < road_america_members.size(); ++i) {
+-        if (i >= 2 && !(active & (1u << (i - 2)))) continue;
+-        const auto &data = mod.data[i];
++    for (std::size_t i = 0; i < mod.catalogs.size(); ++i) {
+         const std::uint64_t offset = std::uint64_t{mod.archive_sector + road_america_members[i].sector} * kSector;
+-        if (copy_overlay_range(start, out, got, offset, data) && i >= 2)
+-            std::fprintf(stderr, "[road-america] loading %s for tqa1\n", road_america_members[i].name);
++        copy_overlay_range(start, out, got, offset, mod.catalogs[i]);
++    }
++    for (std::size_t i = 0; i < mod.selected.size(); ++i) {
++        const auto selected = mod.selected[i].load();
++        if (!selected) continue;
++        const auto &resource = road_america_members[i + 2];
++        const std::uint64_t offset = std::uint64_t{mod.archive_sector + resource.sector} * kSector;
++        if (copy_overlay_range(start, out, got, offset, mod.packages[selected - 1][i]))
++            std::fprintf(stderr, "[road-america] loading %s for %s\n", resource.name, imported_track_ids[selected - 1]);
+     }
+ }
+ 
+@@ -393,33 +416,43 @@
+ 
+ void road_america_path(std::uint32_t address) {
+     if (!g_road_america) return;
++    auto &mod = *g_road_america;
+     const auto name = guest_name(address);
+-    constexpr std::string_view imported = "TRACKS\\TQA1\\";
+-    constexpr std::string_view stock = "TRACKS\\OSC1\\";
+-    const bool selected = name.starts_with(imported);
+-    if (selected || name.starts_with(stock)) {
+-        const auto suffix = name.substr(imported.size());
+-        const unsigned flag = suffix == "SUN\\TRACK.JPK" ? 1u : suffix == "SUN\\DMA1.JPK" ? 2u : 0u;
+-        if (flag) {
+-            if (selected) g_road_america->track_members.fetch_or(flag);
+-            else g_road_america->track_members.fetch_and(~flag);
+-        }
+-        if (selected) std::memcpy(g_ram + address + 7, "OSC1", 4);
+-        return;
++    constexpr std::string_view track_path = "TRACKS\\";
++    if (name.starts_with(track_path) && name.size() > 11 && name[11] == '\\') {
++        const auto id = name.substr(track_path.size(), 4);
++        const auto end = imported_track_ids.begin() + mod.courses;
++        const auto course = std::find(imported_track_ids.begin(), end, id);
++        const auto selected = course == end ? 0u : static_cast<unsigned>(course - imported_track_ids.begin() + 1);
++        if (selected || id == "OSC1") {
++            const auto suffix = name.substr(12);
++            if (suffix == "SUN\\TRACK.JPK") mod.selected[0].store(selected);
++            if (suffix == "SUN\\DMA1.JPK") mod.selected[1].store(selected);
++            if (selected) std::memcpy(g_ram + address + track_path.size(), "OSC1", 4);
++            return;
++        }
+     }
+     // Loading-screen and other companion resources use the reference course.
+-    if (const auto pos = name.find("TQA1"); pos != std::string_view::npos)
+-        std::memcpy(g_ram + address + pos, "OSC1", 4);
++    for (unsigned i = 0; i < mod.courses; ++i) {
++        if (const auto pos = name.find(imported_track_ids[i]); pos != std::string_view::npos) {
++            std::memcpy(g_ram + address + pos, "OSC1", 4);
++            return;
++        }
++    }
+ }
+ 
+ std::uint32_t road_america_member(std::uint32_t address, std::uint32_t scratch) {
++    if (!g_road_america || scratch > kRamSize - 128u) return address;
+     const auto name = guest_name(address);
+-    if (!g_road_america || scratch > kRamSize - 128u) return address;
+-    const auto pos = name.find("tqa1");
+-    if (pos == std::string_view::npos) return address;
+-    std::memmove(g_ram + scratch, name.data(), name.size() + 1);
+-    std::memcpy(g_ram + scratch + pos, "osc1", 4);
+-    return scratch;
++    constexpr std::array keys{"tqa1", "tqa2", "tqa3"};
++    for (unsigned i = 0; i < g_road_america->courses; ++i) {
++        const auto pos = name.find(keys[i]);
++        if (pos == std::string_view::npos) continue;
++        std::memmove(g_ram + scratch, name.data(), name.size() + 1);
++        std::memcpy(g_ram + scratch + pos, "osc1", 4);
++        return scratch;
++    }
++    return address;
+ }
+ 
+ bool read(std::uint32_t sector, std::uint32_t count, void *out) {

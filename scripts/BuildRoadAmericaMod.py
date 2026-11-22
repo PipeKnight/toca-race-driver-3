@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Prepare the Road America add-on from local Race Driver 2 and 3 PS2 discs."""
+"""Prepare Road America and optional A1-Ring layouts from local PS2 discs."""
 
 import argparse
+from dataclasses import dataclass
 import math
 from pathlib import Path
 import re
@@ -12,7 +13,7 @@ import tempfile
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from BuildTrackCollisionOverlay import (
     BIGF_ENTRY, DONOR_DIRECTORY_HASH, JPAK_ENTRY, REFERENCE_DIRECTORY_HASH,
-    SECTOR_SIZE, TRACK_BYTES, TRACK_SECTOR, donor_collision, encode_lzss,
+    SECTOR_SIZE, TRACK_BYTES, TRACK_SECTOR, encode_lzss,
     read_exact, verify_directory,
 )
 from BuildTrackGeometryOverlay import DMA_BYTES, DMA_SECTOR, make_overlay
@@ -22,8 +23,26 @@ TRACK_CATALOG_SECTOR = 80673
 TRACK_CATALOG_BYTES = 0x4800
 EVENT_CATALOG_SECTOR = 81008
 EVENT_CATALOG_BYTES = 0x1FE800
-DONOR_AI_SECTOR = 805031
-ROAD_AMERICA_RECORD = 19
+
+
+@dataclass(frozen=True)
+class Course:
+    slot: str
+    name: str
+    km: str
+    record: int
+    donor_prefix: str
+    route_package: tuple[int, int, int]  # Sector, BIGF entry count, expected .aid size.
+    scene_package: tuple[int, int, int]  # Sector, BIGF entry count, expected col.col size.
+    route_counts: tuple[int, int, int]  # Main, pit, and auxiliary route lengths.
+
+
+ROAD_AMERICA = Course("tqa1", "Road America", "6.057", 19, "roa",
+                      (805031, 50, 23884), (973763, 47, 573324), (387, 42, 50))
+A1_RING = (
+    Course("tqa2", "A1-Ring GP", "4.293", 34, "a11", (803257, 25, 20364), (805290, 36, 595956), (306, 79, 36)),
+    Course("tqa3", "A1-Ring Short", "2.303", 35, "a12", (803292, 23, 10956), (808393, 35, 558396), (114, 79, 28)),
+)
 
 
 def read_bigf(blob, count):
@@ -45,7 +64,7 @@ def repack_bigf(original, members, base, start, limit):
     if 0x24 + len(members) * BIGF_ENTRY.size > base or not base <= start <= limit <= len(original):
         raise ValueError("BIGF archive layout does not fit")
     result = bytearray(original)
-    struct.pack_into("<I", result, 4, len(members))
+    struct.pack_into("<II", result, 4, len(members), base)
     for index, (name, data) in enumerate(members.items()):
         if start + len(data) > limit:
             raise ValueError("BIGF payload exceeds the original read extent")
@@ -55,21 +74,26 @@ def repack_bigf(original, members, base, start, limit):
     return result
 
 
-def track_catalog(original):
+def track_catalog(original, courses=(ROAD_AMERICA,)):
     members, base = read_bigf(original, 80)
     index = re.compile(rb"(?mi)^HOFIndex[ \t]*=[ \t]*(\d+)[ \t]*\r?$")
     indices = {int(index.search(record)[1]) for record in members.values() if index.search(record)}
-    if len(indices) != len(members) or ROAD_AMERICA_RECORD in indices or b"tqa1.ini" in members:
-        raise ValueError("The Road America track or record ID is already in use")
-    members[b"tqa1.ini"] = (
-        b"[Info]\r\nTrackID = tqa1\r\nStage = CIRCUIT\r\nShortName = Road America\r\n"
-        b"FullName = Road America\r\nPitSide = LEFT\r\nHOFIndex = "
-        + str(ROAD_AMERICA_RECORD).encode("ascii") + b"\r\nLengthInKm = 6.057"
-    )
+    if len(indices) != len(members):
+        raise ValueError("Unexpected stock track record indices")
+    for course in courses:
+        member = f"{course.slot}.ini".encode("ascii")
+        if course.record in indices or member in members:
+            raise ValueError(f"The track or record ID for {course.name} is already in use")
+        indices.add(course.record)
+        members[member] = (
+            f"[Info]\r\nTrackID = {course.slot}\r\nStage = CIRCUIT\r\nShortName = {course.name}\r\n"
+            f"FullName = {course.name}\r\nPitSide = LEFT\r\nHOFIndex = {course.record}\r\nLengthInKm = {course.km}"
+        ).encode("ascii")
+    base = max(base, (0x24 + len(members) * BIGF_ENTRY.size + 31) & ~31)
     return repack_bigf(original, members, base, 0x800, 0x4300)
 
 
-def event_catalog(original):
+def event_catalog(original, courses=(ROAD_AMERICA,)):
     members, base = read_bigf(original, 204)
     event = members[b"rccuf.ini"]
     number = re.compile(rb"(?mi)^RacesNum([ \t]*=[ \t]*)9(?=[ \t]*\r?$)")
@@ -78,30 +102,37 @@ def event_catalog(original):
         raise ValueError("Unexpected Clio Cup Free Race calendar")
     source = template[1].rstrip(b"\r\n")
     rounds = []
-    for number_value, track in ((10, b"osc1"), (11, b"tqa1")):
+    tracks = (b"osc1",) + tuple(course.slot.encode("ascii") for course in courses)
+    for number_value, track in enumerate(tracks, 10):
         body, replacements = re.subn(rb"(?mi)^(TrackID[ \t]*=[ \t]*)hoc3", rb"\g<1>" + track, source)
         if replacements != 1:
             raise ValueError("Unexpected Clio Cup track reference")
+        if track in (b"tqa2", b"tqa3"):
+            body = re.sub(rb"(?mi)^Weather2[^\r\n]*\r?\n|^WeatherProb2[^\r\n]*\r?\n", b"", body)
+            body = re.sub(rb"(?mi)^(WeatherProb1[ \t]*=[ \t]*)90", rb"\g<1>100", body)
         rounds.append(f"[Race {number_value}]\r\n".encode("ascii") + body)
-    updated = number.sub(rb"RacesNum\g<1>11", event, count=1).rstrip(b"\r\n\0")
+    updated = number.sub(lambda match: b"RacesNum" + match[1] + str(9 + len(tracks)).encode("ascii"),
+                         event, count=1).rstrip(b"\r\n\0")
     members[b"rccuf.ini"] = updated + b"\r\n\r\n" + b"\r\n\r\n".join(rounds) + b"\r\n"
     return repack_bigf(original, members, base, (base + 31) & ~31, len(original))
 
 
-def read_route(donor):
-    start = DONOR_AI_SECTOR * SECTOR_SIZE
+def read_donor_member(donor, package, member):
+    sector, entries, size = package
+    start = sector * SECTOR_SIZE
     magic, count, base = struct.unpack("<4sII", read_exact(donor, start, 12))
-    if magic != b"BIGF" or count != 50 or base < 0x24 + count * BIGF_ENTRY.size:
-        raise ValueError("Unexpected donor AI package")
+    if magic != b"BIGF" or count != entries or base < 0x24 + count * BIGF_ENTRY.size:
+        raise ValueError(f"Unexpected donor BIGF at sector {sector}")
     directory = read_exact(donor, start + 0x24, count * BIGF_ENTRY.size)
     for name, length, relative in BIGF_ENTRY.iter_unpack(directory):
-        if name.rstrip(b"\0") == b"roa.aid" and length == 23884:
+        if name.rstrip(b"\0") == member and length == size:
             return read_exact(donor, start + base + relative, length)
-    raise ValueError("Missing donor route")
+    raise ValueError(f"Missing or unexpected donor member {member!r}")
 
 
-def convert_route(source):
-    if source[:8] != bytes.fromhex("060d012000058301"):
+def convert_route(source, counts=ROAD_AMERICA.route_counts):
+    main_count, pit_count, aux_count = counts
+    if source[:6] != bytes.fromhex("060d01200005") or struct.unpack_from("<H", source, 6)[0] != main_count:
         raise ValueError("Unexpected donor route header")
 
     def section(offset, size, lanes):
@@ -116,13 +147,13 @@ def convert_route(source):
             raise ValueError("Truncated donor route section")
         return coordinates, rows, end
 
-    main, main_events, position = section(12, 387, 5)
-    if struct.unpack_from("<BBH", source, position) != (1, 3, 42):
+    main, main_events, position = section(12, main_count, 5)
+    if struct.unpack_from("<BBH", source, position) != (1, 3, pit_count):
         raise ValueError("Unexpected donor pit lane")
-    pit, pit_events, position = section(position + 8, 42, 3)
-    if struct.unpack_from("<BBH", source, position) != (2, 2, 50):
+    pit, pit_events, position = section(position + 8, pit_count, 3)
+    if struct.unpack_from("<BBH", source, position) != (2, 2, aux_count):
         raise ValueError("Unexpected donor auxiliary route")
-    auxiliary, aux_events, _ = section(position + 8, 50, 2)
+    auxiliary, aux_events, _ = section(position + 8, aux_count, 2)
     sections = ((main, main_events, 0x1F, 1), (pit + [pit[2]], pit_events, 0x27, 0),
                 (auxiliary, aux_events, 3, 0))
     first = next(i for i, row in enumerate(main_events) if row[2] == 12)
@@ -248,24 +279,35 @@ def main():
     parser.add_argument("reference_disc", type=Path, help="extracted SLUS-21182 v1.02 disc directory")
     parser.add_argument("donor_disc", type=Path, help="mounted or extracted SLES-52638 v1.02 disc directory")
     parser.add_argument("output", type=Path, help="new directory for the generated add-on")
+    parser.add_argument("--include-a1-ring", action="store_true", help="add separate A1-Ring GP and Short slots")
     args = parser.parse_args()
     try:
         verify_directory(args.reference_disc / "RDH.DIR", REFERENCE_DIRECTORY_HASH)
         verify_directory(args.donor_disc / "RD2.DIR", DONOR_DIRECTORY_HASH)
         if args.output.exists():
             raise ValueError("Choose a new add-on output directory")
+        courses = (ROAD_AMERICA, *A1_RING) if args.include_a1_ring else (ROAD_AMERICA,)
         with (args.reference_disc / "RDH_1.HUG").open("rb") as reference, \
-             (args.donor_disc / "RD2_1.HUG").open("rb") as donor:
-            tracks = track_catalog(read_exact(reference, TRACK_CATALOG_SECTOR * SECTOR_SIZE, TRACK_CATALOG_BYTES))
-            events = event_catalog(read_exact(reference, EVENT_CATALOG_SECTOR * SECTOR_SIZE, EVENT_CATALOG_BYTES))
-            collision = donor_collision(args.donor_disc / "RD2_1.HUG")
-            route = convert_route(read_route(donor))
-            track = track_package(read_exact(reference, TRACK_SECTOR * SECTOR_SIZE, TRACK_BYTES), collision, route)
-            geometry, _ = make_overlay(read_exact(reference, DMA_SECTOR * SECTOR_SIZE, DMA_BYTES), donor)
-        with tempfile.TemporaryDirectory(dir=args.output.parent) as stage:
-            for name, data in (("tracks.big", tracks), ("events.big", events), ("TRACK.JPK", track), ("DMA1.JPK", geometry)):
-                (Path(stage) / name).write_bytes(data)
-            Path(stage).rename(args.output)
+             (args.donor_disc / "RD2_1.HUG").open("rb") as donor, tempfile.TemporaryDirectory(dir=args.output.parent) as stage:
+            output = Path(stage)
+            tracks = track_catalog(read_exact(reference, TRACK_CATALOG_SECTOR * SECTOR_SIZE, TRACK_CATALOG_BYTES), courses)
+            events = event_catalog(read_exact(reference, EVENT_CATALOG_SECTOR * SECTOR_SIZE, EVENT_CATALOG_BYTES), courses)
+            (output / "tracks.big").write_bytes(tracks)
+            (output / "events.big").write_bytes(events)
+            original_track = read_exact(reference, TRACK_SECTOR * SECTOR_SIZE, TRACK_BYTES)
+            original_dma = read_exact(reference, DMA_SECTOR * SECTOR_SIZE, DMA_BYTES)
+            for course in courses:
+                folder = output if course == ROAD_AMERICA else output / course.slot
+                folder.mkdir(exist_ok=True)
+                collision = read_donor_member(donor, course.scene_package, b"col.col")
+                route = read_donor_member(donor, course.route_package, f"{course.donor_prefix}.aid".encode("ascii"))
+                track = track_package(original_track, collision, convert_route(route, course.route_counts))
+                scene_sector, scene_entries, _ = course.scene_package
+                geometry, _ = make_overlay(original_dma, donor, donor_sector=scene_sector, donor_prefix=course.donor_prefix,
+                                           donor_members_count=scene_entries)
+                (folder / "TRACK.JPK").write_bytes(track)
+                (folder / "DMA1.JPK").write_bytes(geometry)
+            output.rename(args.output)
     except (OSError, ValueError, IndexError, KeyError, StopIteration, struct.error) as error:
         parser.exit(1, f"Road America setup failed: {error}\n")
     print(f"Road America add-on prepared at {args.output}")

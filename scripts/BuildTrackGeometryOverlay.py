@@ -205,7 +205,7 @@ def convert_scene(source):
             + FOOTER.pack(count + len(added), len(payload), base)), len(nodes)
 
 
-def make_overlay(original, donor_archive):
+def make_overlay(original, donor_archive, *, donor_sector=DONOR_SECTOR, donor_prefix="roa", donor_members_count=47):
     magic, _, count = struct.unpack_from("<4sII", original)
     if magic != b"JPAK" or count != 14:
         raise ValueError("Unexpected reference DMA1.JPK directory")
@@ -215,12 +215,12 @@ def make_overlay(original, donor_archive):
     if not index_end <= data_start <= len(original):
         raise ValueError("Invalid reference DMA1.JPK directory bounds")
 
-    start = DONOR_SECTOR * SECTOR_SIZE
+    start = donor_sector * SECTOR_SIZE
     magic, donor_count, data_base = struct.unpack("<4sII", read_exact(donor_archive, start, 12))
     available = donor_archive.seek(0, 2) - start - data_base
-    if (magic != b"BIGF" or donor_count != 47
+    if (magic != b"BIGF" or donor_count != donor_members_count
             or data_base < 36 + donor_count * BIGF_ENTRY.size or available <= 0):
-        raise ValueError("Unexpected Road America BIGF directory")
+        raise ValueError(f"Unexpected {donor_prefix} BIGF directory")
     bigf = read_exact(donor_archive, start + 36, donor_count * BIGF_ENTRY.size)
     donor_members = {name.split(b"\0", 1)[0].decode("ascii").lower(): (length, relative)
                      for name, length, relative in BIGF_ENTRY.iter_unpack(bigf)}
@@ -233,7 +233,7 @@ def make_overlay(original, donor_archive):
             raise ValueError("Unexpected reference DMA1.JPK member")
         member = original[name_offset:data_start].split(b"\0", 1)[0].decode("ascii")
         stem = Path(member).stem
-        donor_name = f"roa_{names.get(stem, stem)}.dma"
+        donor_name = f"{donor_prefix}_{names.get(stem, stem)}.dma"
         if donor_name not in donor_members:
             raise ValueError(f"Donor geometry member {donor_name!r} is missing")
         length, relative = donor_members[donor_name]

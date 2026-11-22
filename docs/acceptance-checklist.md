@@ -71,7 +71,9 @@ The first release target is the North American PS2 disc `SLUS-21182` v1.02. Play
 - [x] Verify that a Road America Time Trial record survives a cold restart. A 2:47.56 lap appeared under Road America in the ghost list alongside the stock Dirt Raceway 1 record. [Road America add-on](ps2-disc-and-archives.md#play-road-america-from-your-own-discs)
 - [ ] Verify the Road America entry in the Hall of Fame table and validate additional weather configurations.
 - [x] Start a race on the imported A1-Ring GP and A1-Ring Short layouts from separate cold runs. Verify the track names and that both donor packages load in each run. [A1-Ring donor packages](ps2-disc-and-archives.md#race-driver-2-donor-disc)
-- [ ] Finish a full race on each A1-Ring layout and register both in permanent, separate track slots.
+- [x] Register A1-Ring GP and Short in permanent, separate track slots alongside Road America. Verify that the expanded pack still starts a race on Road America and stock Oschersleben and that the original Road America pack still loads. [A1-Ring add-on](ps2-disc-and-archives.md#add-a1-ring-gp-and-short)
+- [x] Finish a full race on each permanent A1-Ring slot. Both Autosport Clio Cup races reached the finish menu in Direct3D 12 from power-on with recorded controller input. The results replay classified Player One 16th on each layout, triggered both autosaves, and cold-loaded both resulting profiles. [A1-Ring add-on](ps2-disc-and-archives.md#add-a1-ring-gp-and-short)
+- [ ] Verify persistent race and Time Trial records for both A1-Ring layouts in the relevant record screens after a cold launch.
 - [ ] Demonstrate a replaceable track and car from independently created assets. For additional slots, verify registration, selection, collisions, checkpoints, AI paths, and stable saves. Track RD3_BD7sTools collaboration in the project plan.
 
 Custom tracks and cars have their own acceptance criteria. The recompilation can reach its first release using the original disc content.
