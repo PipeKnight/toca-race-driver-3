@@ -197,7 +197,15 @@ The test restored a profile from the automatic backup created when Time Trial sa
 
 #### Verify a local multiplayer reconnect
 
-The exact Windows preview candidate entered a one-lap World Sprintcar Series race on National Dirt Raceway Stage 1 with two local players. Both views showed the rolling start and the race clock. A second run loaded a mid-race checkpoint and connected two SDL virtual controllers. The game displayed its port 2 reconnect prompt when the second controller was removed. Reattaching it cleared the prompt. Player 1 selected Continue, the race clock advanced in both views, and the runner logged new input on port 2 while the lower car moved. The candidate exited normally and preserved the copied card's SHA-256. This check covers disconnect and resume. The split-screen finish and physical controller checks remain open. Logs and frames are under `local/multiplayer-qa/preview-grid/` and `local/multiplayer-qa/preview-resume/`.
+The exact Windows preview candidate entered a one-lap World Sprintcar Series race on National Dirt Raceway Stage 1 with two local players. Both views showed the rolling start and the race clock. A second run loaded a mid-race checkpoint and connected two SDL virtual controllers. The game displayed its port 2 reconnect prompt when the second controller was removed. Reattaching it cleared the prompt. Player 1 selected Continue, the race clock advanced in both views, and the runner logged new input on port 2 while the lower car moved. The candidate exited normally and preserved the copied card's SHA-256. This check covers disconnect and resume. Logs and frames are under `local/multiplayer-qa/preview-grid/` and `local/multiplayer-qa/preview-resume/`.
+
+#### Finish a two-player local multiplayer race
+
+Two scripted players completed the one-lap World Sprintcar Series event on National Dirt Raceway Stage 1 with four AI opponents. A local test runner generated the controller recording from the rolling start using car position and heading as feedback. The unmodified `0.1.0-preview.1` candidate played that recording from frame 6680 through 12620 on the RTX 4070 through Direct3D 12. All 396 replay checks matched, and all nine shared frame captures were byte-identical. The runner delivered 99.00 seconds of game audio with zero WASAPI underruns or dropped samples during the replay.
+
+From the two-player finish checkpoint, Player 1 selected Continue. Race Results showed **Player Two** in fifth with `1:14.43` and 50 points, and **Player One** in sixth with `1:15.91` and 25 points. The game wrote its autosave. Continuing displayed the championship results with the same points and then returned to Select Mode. The card passed filesystem and ECC verification.
+
+A new process booted from the ISO and the written card, displayed **Load Successful**, and opened the main menu. It performed 341 page reads with zero writes, and the card retained SHA-256 `123e6b1c8cbee52a1d3c14519f5f9fe12baa1dd25fcd081e7ab2e4ce23c3c7cc`. This verifies profile reload after the multiplayer race. Physical multiplayer controllers remain to be tested. Evidence is under `local/multiplayer-qa/preview-two-finishes/`, `local/multiplayer-qa/preview-two-player-results-primary/`, `local/multiplayer-qa/preview-advance-stage-two/`, and `local/multiplayer-qa/preview-cold-finish-card/`.
 
 #### Windows Sandbox verification
 
