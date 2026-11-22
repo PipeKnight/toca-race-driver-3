@@ -170,4 +170,41 @@ A diagnostic runner read the catalog at guest frame 15 in two reads covering nin
 
 The Autosport Clio Cup Free Race fixture added two rounds to `rccuf.ini`, referencing stock Oschersleben (`osc1`) and the synthetic track (`tqa1`), while retaining its nine original rounds. The game's track carousel displayed **Motopark Oschersleben** and **QA Catalog Circuit** as consecutive choices. Accepting the new entry opened **Select Car**. The test reached frame 5240 with 341 card reads, zero card writes, and the same memory card SHA-256. A checkpoint replay continued through car selection and race setup to **Next Session: Race · QA Circuit · Sunny**. Screenshots are in `clio-track-selection/frames/` and `clio-track-start/frames/` under the private test data directory.
 
-The test entry uses Oschersleben's `HOFIndex` for this menu experiment. A playable import needs separately verified record storage, preview assets, geometry, collision, checkpoints, and AI paths.
+### Finish a race in QA Circuit
+
+The Windows 11 Direct3D 12 diagnostic build selected QA Circuit (`tqa1`) in the Autosport Clio Cup and displayed **Next Session: Race · QA Circuit · Sunny**. The diagnostic build rewrote `tqa1` as `osc1` only for archive paths and JPAK member lookups. It hooked normalized paths at `0x002568e4` and nested member names at `0x00388f98`. The original ISO was opened read-only. The overlays added the catalog and event entries, while the alias selected existing disc resources for rendering and race logic.
+
+| Requested for `tqa1` | Resolved package in `RDH_1.HUG` | Archive-relative sector | Guest frame |
+| --- | --- | ---: | ---: |
+| `TRACK.JPK` | `TRACKS\OSC1\SUN\TRACK.JPK` | 516,992 | 7,203 |
+| `DMA1.JPK` | `TRACKS\OSC1\SUN\DMA1.JPK` | 519,440 | 7,221 |
+| `TRACK.BIG` | `TRACKS\OSC1\SUN\TRACK.BIG` | 522,960 | 7,328 |
+
+Nested lookups resolved the stock `osc1.big` package and its AI members, including `osc1.ail`. At frame 8300, EE memory at `0x01281540` contained the header of the decoded Oschersleben `col.col`. The vertex data, triangle indices, and cell data matched the source member byte for byte. The captured race rendered the Oschersleben course and completed one lap in **2:04.75**, in **20th of 20**, with the checkered flag and **Continue** prompt visible by frame 15400. A controller harness followed a line sampled from a stock opponent and sent steering, throttle, and brake through the normal pad input path. A separate run used only the recorded input and matched all 527 checkpoints through the finish. At frame 16448, **Race Results** showed **Player One (P1)** in 20th place at **2:04.75**, 15.45 seconds behind the winner.
+
+The experiment used an isolated memory-card copy. QA Circuit still shares Oschersleben's `HOFIndex`. A separate record index, imported assets, and a user-facing mod loader remain open. Local evidence includes `setup-and-grid/frames/frame_05990.png`, `race-grid/trace.log`, `race-finish/frames/frame_15400.png`, and `race-results-player/frames/frame_16448.png` under `local/qa-circuit-drive/`.
+
+### Race Driver 2 donor disc
+
+The inspected PS2 disc is the PAL release, serial `SLES-52638`, version `1.02`. Its archive layout uses `RD2.DIR` and three `RD2_*.HUG` files.
+
+| File | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `SLES_526.38` | 4,044,780 | `64457f06ef5331e2627e14b694607fbed9d455f263a3d9e614b69490af4b6ceb` |
+| `RD2.DIR` | 32,768 | `44d9757ba1d4bef1765cb8247c1c6585320e1a413b0af13979e28d05689915a2` |
+| `RD2_0.HUG` | 2,147,481,600 | |
+| `RD2_1.HUG` | 2,147,481,600 | |
+| `RD2_2.HUG` | 368,640,000 | |
+
+The `BIGF` at byte `0x74205800` of `RD2_0.HUG` contains `RD2Lang_C.Lng`. That language resource contains **A1-Ring Short** at archive offset `0x74207f70`, **A1-Ring GP** at `0x74207f80`, and **Road America** at `0x7420806c`.
+
+A scan found sector-aligned `BIGF` packages containing PS2 DMA geometry and `col.col` in `RD2_1.HUG`. The `roa` prefix is the candidate for Road America. Its package at sector 805031 contains `roa.aid` and class-specific `.aib` entries.
+
+| Key | Archive-relative sector | Geometry member | Collision vertices | Collision triangles |
+| --- | ---: | --- | ---: | ---: |
+| `roa` | 973,763 and 976,987 | `roa_trk.dma` | 11,227 | 16,940 |
+| `a11` | 805,290 | `a11_trk.dma` | 12,906 | 18,704 |
+| `a12` | 808,393 | `a12_trk.dma` | 10,826 | 16,642 |
+| `a13` | 811,291 | `a13_trk.dma` | 12,906 | 18,704 |
+
+The sampled collision members have valid bounds and triangle indices within their vertex arrays when parsed with the Race Driver 3 collision layout. This establishes a shared structure for further tests. The importer still needs to verify runtime collision behavior, DMA geometry compatibility, and conversion of checkpoint and AI data. The configuration keys for A1-Ring Short and GP also need to be mapped to their display names. The read-only inventory and member-offset report are in `race-driver-2-packages.json` and `race-driver-2-track-formats.json` under `local/qa-circuit-drive/`.

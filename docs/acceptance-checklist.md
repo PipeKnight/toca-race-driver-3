@@ -61,6 +61,7 @@ The first release target is the North American PS2 disc `SLUS-21182` v1.02. Play
 
 ## Separate modding milestone
 
+- [x] Finish a race in an additional track slot using stock geometry, collision, and race data. QA Circuit finished an Autosport Clio Cup Free Race on Windows 11. [QA Circuit race](ps2-disc-and-archives.md#finish-a-race-in-qa-circuit)
 - [ ] Demonstrate a replaceable track and car from independently created assets. For additional slots, verify registration, selection, collisions, checkpoints, AI paths, and stable saves. Track RD3_BD7sTools collaboration in the project plan.
 
 Custom tracks and cars have their own acceptance criteria. The recompilation can reach its first release using the original disc content.
