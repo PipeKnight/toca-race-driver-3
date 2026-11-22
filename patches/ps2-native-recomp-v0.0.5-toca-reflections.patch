@@ -1,0 +1,256 @@
+--- a/recomp/vurecomp_gen.cpp
++++ b/recomp/vurecomp_gen.cpp
+@@ -500,6 +500,7 @@
+ 
+ std::string generate(const Program &p, std::string &name) {
+     name.clear();
++    const bool efu_timing = p.unit == 1 && ps2::vu::toca_efu_program(p.code.data(), p.entry);
+     const std::uint32_t kMask = p.unit == 0 ? 4095u : 16383u;
+     const std::vector<std::uint32_t> pcs = ps2::vu::reachable(p.code.data(), kMask, p.entry);
+     const ps2::vu::StallPlan plan = ps2::vu::stall_plan(p.code.data(), kMask, pcs, p.entry);
+@@ -512,6 +513,9 @@
+         Lower l;
+         if (!(hi & 0x80000000u)) l = lower(lo, pc, kMask, p.unit == 0);
+         if (ps2::vu::branch_in_delay_slot(p.code.data(), kMask, pc)) l.supported = false;
++        // The timing state is local to this compiled program. Let the interpreter
++        // handle a variant whose control flow could leave it before the end.
++        if (efu_timing && (!l.supported || l.jump)) return {};
+         any_status = any_status || l.reads_status;
+         any_flags = any_flags || l.reads_flags;
+         any_q = any_q || l.code.find("fl.end_q(") != std::string::npos;
+@@ -606,6 +610,7 @@
+     name = std::format("vu{}_{:016X}", p.unit, p.key);
+     std::string o = std::format("void {}(Vu0Regs &r, std::uint8_t *mem) {{\n    FlagPipe fl;\n    fl.start(r);\n    bool pend = false, pendj = false, ending = false;\n    std::uint32_t jpc = 0;\n    (void)pend;\n    (void)pendj;\n    (void)ending;\n    (void)jpc;\n",
+                                 name);
++    if (efu_timing) o += "    EfuPipe ep;\n    const bool timed_p = vu::toca_efu_enabled();\n";
+     if (p.unit == 0) o += "    std::uint32_t steps = 0;\n";
+     if (!delay.empty()) o += "    std::uint16_t bk = 0, next_bk = 0;\n    unsigned bi = 0;\n    (void)bk;\n    (void)next_bk;\n    (void)bi;\n";
+     // An instruction whose stall depends on the path that led to it reads the pipeline state index `st` the edges set.
+@@ -629,10 +634,16 @@
+         for (std::int64_t s : successors(pc)) out_live = out_live || s < 0 || !in.count(static_cast<std::uint32_t>(s)) || live_in[static_cast<std::uint32_t>(s)];
+         const Upper u = upper(hi, any_status ? true : (any_flags && out_live), p.unit == 0);
+         const Lower &l = lowers[pc];
++        const unsigned p_op = efu_timing ? ps2::vu::efu_opcode(lo, hi) : 0;
++        const unsigned p_latency = ps2::vu::efu_latency(p_op);
+         std::string body;
+         if (const auto kb = keep_bk.find(pc); kb != keep_bk.end()) body += std::format("next_bk = r.vi[{}]; ", kb->second);
+         body += u.pre;
+         std::string lcode = l.code;
++        if (p_latency) {
++            const unsigned fs = (lo >> 11) & 31u, fsf = (lo >> 21) & 3u;
++            lcode = std::format("ep.issue(r, fl.t, {}u, {}u, {}u, timed_p ? {}u : 0u); ", p_op, fs, fsf, p_latency);
++        }
+         if (const auto d = delay.find(pc); d != delay.end()) {
+             for (int reg = 1; reg < 16; ++reg) {
+                 if (d->second == 2) replace_all(lcode, std::format("r.vi[{}]", reg), std::format("(bi == {} ? bk : r.vi[{}])", reg, reg));
+@@ -655,6 +666,8 @@
+         if (plan.tracked[pc >> 3]) o += std::format("{}: {{ {}fl.t += 1u + ks_{:04X}[st]; ", label(pc), stop, pc);
+         else if (stall) o += std::format("{}: {{ {}fl.t += {}u; ", label(pc), stop, 1 + stall);
+         else o += std::format("{}: {{ {}++fl.t; ", label(pc), stop);
++        if (p_latency || p_op == 0x7B) o += "ep.wait(r, fl.t); ";
++        else if (p_op == 0x64) o += "ep.sync(r, fl.t); ";
+         if (any_q && ps2::vu::reads_q(hi)) {
+             const ps2::vu::QRead kind = ps2::vu::q_read_kind(p.code.data(), kMask, pc);
+             if (kind == ps2::vu::kQNew) o += "fl.flush_q(r); ";
+@@ -697,6 +710,10 @@
+         replace_all(o, "vu::interpret(", "fl.flush_q(r); vu::interpret(");
+         replace_all(o, "r.tpc = ", "fl.flush_q(r); r.tpc = ");
+     }
++    if (efu_timing) {
++        replace_all(o, "vu::interpret(", "ep.flush(r); vu::interpret(");
++        replace_all(o, "r.tpc = ", "ep.flush(r); r.tpc = ");
++    }
+     if (p.unit == 0) {
+         replace_all(o, "qword(mem,", "qword<255u>(mem,");
+         replace_all(o, "vu::kick(1,", "vu::kick(0,");
+@@ -712,7 +729,7 @@
+ 
+ // Bump this when the generated code changes in a way the headers do not show (a change in this file): libraries made earlier
+ // are then left alone and built again (vu_live.cpp).
+-const char *const kGeneratorVersion = "vurecomp 6";
++const char *const kGeneratorVersion = "vurecomp 6 toca-efu";
+ 
+ Result generate_files(std::vector<Input> inputs, const fs::path &out_dir, std::uint64_t live_stamp, std::size_t per_file, bool with_targets) {
+     std::vector<Program> programs;
+@@ -803,6 +820,7 @@
+ void kick(int unit, std::uint32_t address) {{ g_host.kick(unit, address); }}
+ std::uint32_t top() {{ return g_host.top(); }}
+ std::uint32_t itop() {{ return g_host.itop(); }}
++bool toca_efu_enabled() {{ return g_host.toca_efu_enabled(); }}
+ }}
+ 
+ PS2_LIVE_EXPORT std::uint64_t ps2_vu_live_stamp() {{ return 0x{:016X}ull; }}
+--- a/runtime/src/vu_micro.cpp
++++ b/runtime/src/vu_micro.cpp
+@@ -942,6 +942,11 @@
+ }
+ 
+ void run_entry(int unit, std::uint32_t pc);
++
++bool toca_efu_enabled() {
++    static const bool enabled = os::env("PS2_TOCA_EFU_TIMING") == "1";
++    return enabled;
++}
+ 
+ bool g_chaining = false;
+ std::int64_t g_chained = -1;
+@@ -1154,7 +1159,7 @@
+     const auto it = g_programs.find(key);
+     e.function = it == g_programs.end() ? nullptr : it->second;
+     e.jit = nullptr;
+-    const int jit_mode = jit::mode();
++    const int jit_mode = toca_efu_program(g_vu1_code, address) && toca_efu_enabled() ? 0 : jit::mode();
+     if (jit_mode == 2 || (jit_mode >= 1 && !e.function)) e.function = jit_program(key, address);
+     else if (jit_mode == 3) e.jit = jit_program(key, address);
+     Candidate c = make_candidate(pcs);
+@@ -1186,11 +1191,13 @@
+     Unit u = unit_of(n);
+     Vu0Regs &r = *u.regs;
+     if (g_scan[n]) scan_flags(n, u.code, u.code_mask + 1);
+-    const bool flags = g_flags_used[n], clock = g_clock_used[n];
++    const bool timed_efu = n == 1 && toca_efu_program(g_vu1_code, address) && toca_efu_enabled();
++    const bool flags = g_flags_used[n], clock = g_clock_used[n] || timed_efu;
+     Decoded *cache = g_decoded[n];
+     vuops::FlagPipe pipe;
+     pipe.start(r);
+     u.pipe = &pipe;
++    vuops::EfuPipe efu;
+     std::uint32_t vf_ready[32][4] = {}, vi_ready[16] = {};
+     std::uint32_t pc = address & u.code_mask, npc = (pc + 8u) & u.code_mask;
+     bool ending = false;
+@@ -1213,12 +1220,13 @@
+         const std::uint32_t current = pc;
+         pc = npc;
+         npc = (npc + 8u) & u.code_mask;
+-        if (clock) {
+-            pipe.t = issue_cycle(d.use, pipe.t + 1u, vf_ready, vi_ready, pipe.q_ready);
+-            retire(d.use, pipe.t, vf_ready, vi_ready);
+-        } else {
+-            ++pipe.t;
+-        }
++        ++pipe.t;
++        if (clock) pipe.t = issue_cycle(d.use, pipe.t, vf_ready, vi_ready, pipe.q_ready);
++        const unsigned p_op = timed_efu ? efu_opcode(lo, hi) : 0;
++        const unsigned p_latency = efu_latency(p_op);
++        if (p_latency || p_op == 0x7B) efu.wait(r, pipe.t);
++        else efu.sync(r, pipe.t);
++        if (clock) retire(d.use, pipe.t, vf_ready, vi_ready);
+         read_q(u, pipe, r, current, hi);
+         fast_upper(r, d, out);
+         std::uint16_t was[16];
+@@ -1229,7 +1237,9 @@
+         } else {
+             bool branch = false;
+             std::uint32_t target = npc;
++            const auto previous_p = r.p;
+             lower(u, lo, current, target, branch);
++            if (p_latency) efu.enqueue(r, previous_p, pipe.t, p_latency);
+             if (branch) npc = target;
+             if (branch && record_jumps && n == 1 && ((lo >> 25) == 0x24u || (lo >> 25) == 0x25u)) lookup(target);
+         }
+@@ -1259,6 +1269,7 @@
+         r.vi[0] = 0;
+         if (ending) {
+             pipe.flush_q(r);
++            efu.flush(r);
+             r.tpc = pc;
+             return;
+         }
+--- a/runtime/src/vu_live.cpp
++++ b/runtime/src/vu_live.cpp
+@@ -113,7 +113,7 @@
+     const auto stamp = reinterpret_cast<StampFn>(lb::find_symbol(library, "ps2_vu_live_stamp"));
+     const auto init = reinterpret_cast<InitFn>(lb::find_symbol(library, "ps2_vu_live_init"));
+     if (!stamp || !init || stamp() != g->stamp) return false;  // stays loaded: it cannot be unloaded safely, and it is rare
+-    static const LiveHost host = {&ps2::vu::interpret, &ps2::vu::kick, &ps2::vu::top, &ps2::vu::itop};
++    static const LiveHost host = {&ps2::vu::interpret, &ps2::vu::kick, &ps2::vu::top, &ps2::vu::itop, &ps2::vu::toca_efu_enabled};
+     std::uint32_t n = 0;
+     const Program *table = init(&host, &n);
+     std::lock_guard lock(g->mutex);
+--- a/runtime/include/ps2/vu_ops.hpp
++++ b/runtime/include/ps2/vu_ops.hpp
+@@ -26,6 +26,7 @@
+ std::uint32_t itop();
+ std::uint32_t itop(int unit);  // VU0 reads VIF0; the no-argument form retains the VU1 live-library ABI.
+ void interpret(int unit, std::uint32_t pc);
++bool toca_efu_enabled();
+ // AOT VU0 checks for a host stop at the same interval as the reference loop.
+ bool stopped();
+ 
+@@ -40,13 +41,35 @@
+ void register_programs(const Program *programs, std::uint32_t count);
+ 
+ // The functions of the runner that generated code calls. A library made while the game runs (runtime/src/vu_live.cpp) is not
+-// linked to the runner: it gets these four in a table when it is loaded.
++// linked to the runner: it gets these functions in a table when it is loaded.
+ struct LiveHost {
+     void (*interpret)(int unit, std::uint32_t pc);
+     void (*kick)(int unit, std::uint32_t address);
+     std::uint32_t (*top)();
+     std::uint32_t (*itop)();
++    bool (*toca_efu_enabled)();
+ };
++
++// Recognize the two verified entries of the TOCA car lighting program.
++inline bool toca_efu_program(const std::uint8_t *code, std::uint32_t pc) {
++    if (pc != 0x1D10u && pc != 0x2410u) return false;
++    std::uint64_t first_sum, sum_and_read[2];
++    std::memcpy(&first_sum, code + 0x21B0, sizeof first_sum);
++    std::memcpy(sum_and_read, code + 0x2208, sizeof sum_and_read);
++    return first_sum == 0x01C421FF81E05F7Eull &&
++           sum_and_read[0] == 0x01D9632881E03F7Eull &&
++           sum_and_read[1] == 0x01A8529B8027067Cull;
++}
++
++inline unsigned efu_opcode(std::uint32_t lo, std::uint32_t hi) {
++    if ((hi & 0x80000000u) || (lo >> 25) != 0x40u || (lo & 0x3Cu) != 0x3Cu) return 0;
++    return ((lo >> 6) & 31u) * 4u + (lo & 3u);
++}
++
++inline unsigned efu_latency(unsigned op) {
++    constexpr unsigned latency[] = {11, 18, 18, 24, 54, 54, 12, 0, 12, 18, 12, 0, 29, 54, 44};
++    return op >= 0x70u && op <= 0x7Eu ? latency[op - 0x70u] : 0;
++}
+ 
+ inline std::uint32_t lower_major(std::uint32_t lo) { return lo >> 25; }
+ // Flag reads, ILW/ILWR, and XTOP/XITOP bypass the VI delay seen by branch operands.
+@@ -1000,4 +1023,38 @@
+     }
+ }
+ 
+-}
++struct EfuPipe {
++    std::uint32_t ready = 0;
++    std::uint32_t result = 0;
++
++    PS2_VU_INLINE void wait(Vu0Regs &r, std::uint32_t &cycle) {
++        // WAITP and another EFU instruction may issue one cycle before P retires.
++        if (!ready) return;
++        cycle = std::max(cycle, ready - 1);
++        flush(r);
++    }
++
++    PS2_VU_INLINE void sync(Vu0Regs &r, std::uint32_t cycle) {
++        if (ready && cycle >= ready) flush(r);
++    }
++
++    PS2_VU_INLINE void enqueue(Vu0Regs &r, std::uint32_t previous, std::uint32_t cycle, unsigned latency) {
++        result = r.p;
++        r.p = previous;
++        ready = cycle + latency;
++    }
++
++    PS2_VU_INLINE void issue(Vu0Regs &r, std::uint32_t cycle, unsigned op, unsigned fs, unsigned fsf, unsigned latency) {
++        const std::uint32_t previous = r.p;
++        efu(r, op, fs, fsf);
++        if (latency) enqueue(r, previous, cycle, latency);
++    }
++
++    PS2_VU_INLINE void flush(Vu0Regs &r) {
++        if (!ready) return;
++        r.p = result;
++        ready = 0;
++    }
++};
++
++}

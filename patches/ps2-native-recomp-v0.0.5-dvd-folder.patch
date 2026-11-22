@@ -1,0 +1,621 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -16,6 +16,7 @@
+ set(PS2_GENERATED "" CACHE PATH "Folder with the C++ generated for a game")
+ set(PS2_RUNTIME_LIB "" CACHE FILEPATH "libps2runtime.a built earlier from this source tree (scripts/runtime.sh); a game links it instead of compiling the runtime again")
+ set(PS2_LIBCHDR_DIR "" CACHE PATH "Optional libchdr source directory for native DVD CHD support")
++option(PS2_EMBED_COMPILER_PATH "Use the build compiler path as a live compiler fallback" ON)
+ 
+ if(WIN32)
+     add_link_options(-static-libgcc -static-libstdc++)
+@@ -105,23 +106,28 @@
+                 DEPENDS runtime/include/ps2/${hdr}.hpp cmake/embed.cmake)
+             target_sources(ps2runtime PRIVATE "${live_hdr}")
+         endforeach()
+-        # the compiler this runner was built with is the last place vu_live.cpp looks for one
+-        set_property(SOURCE runtime/src/live_build.cpp APPEND PROPERTY COMPILE_DEFINITIONS "PS2_LIVE_DEFAULT_CXX=\"${CMAKE_CXX_COMPILER}\"")
++        if(PS2_EMBED_COMPILER_PATH)
++            # The build compiler is a fallback when developer tools are still available.
++            set_property(SOURCE runtime/src/live_build.cpp APPEND PROPERTY COMPILE_DEFINITIONS "PS2_LIVE_DEFAULT_CXX=\"${CMAKE_CXX_COMPILER}\"")
++        endif()
+     endif()
+ endif()
+ if(NOT WIN32 AND NOT EMSCRIPTEN)
+     target_link_libraries(ps2runtime ${PS2_API} ${CMAKE_DL_LIBS})  # vu_live.cpp loads libraries with dlopen
+ endif()
+ target_include_directories(ps2runtime ${PS2_API} "${CMAKE_CURRENT_SOURCE_DIR}/runtime/include")
++if(NOT EMSCRIPTEN)
++    add_executable(ps2dvdread EXCLUDE_FROM_ALL host/dvd_read.cpp)
++    target_include_directories(ps2dvdread PRIVATE runtime/include runtime/src)
++    if(WIN32)
++        target_link_options(ps2dvdread PRIVATE -municode)
++    endif()
++endif()
+ if(PS2_LIBCHDR_DIR AND NOT EMSCRIPTEN)
+     enable_language(C)
+     add_subdirectory("${PS2_LIBCHDR_DIR}" libchdr EXCLUDE_FROM_ALL)
+-    add_executable(ps2dvdread EXCLUDE_FROM_ALL host/dvd_read.cpp)
+-    target_include_directories(ps2dvdread PRIVATE runtime/include runtime/src)
+     target_link_libraries(ps2dvdread PRIVATE chdr-static)
+-    if(WIN32)
+-        target_link_options(ps2dvdread PRIVATE -municode)
+-    endif()
++    target_compile_definitions(ps2dvdread PRIVATE PS2_DVD_CHD)
+     if(PS2_PREBUILT)
+         target_link_libraries(ps2runtime INTERFACE "$<LINK_ONLY:chdr-static>")
+     else()
+diff --git a/host/dvd_read.cpp b/host/dvd_read.cpp
+--- a/host/dvd_read.cpp
++++ b/host/dvd_read.cpp
+@@ -1,4 +1,7 @@
++#include "toca_dvd_directory.hpp"
++#ifdef PS2_DVD_CHD
+ #include "dvd_chd.hpp"
++#endif
+ 
+ #ifdef _WIN32
+ #include <fcntl.h>
+@@ -10,8 +13,9 @@
+ 
+ // Setup reads from one open image. The first line is the decoded size. Each
+ // request is a byte offset and count, followed by exactly that many bytes.
+-int serve(const std::string &path) {
+-    ps2::disc::DvdChd dvd;
++template <class Dvd>
++int serve_image(const std::string &path) {
++    Dvd dvd;
+     if (!dvd.open(path)) return 2;
+     if (std::printf("%llu\n", static_cast<unsigned long long>(dvd.size())) < 0 ||
+         std::fflush(stdout) != 0) return 2;
+@@ -34,6 +38,18 @@
+     return std::ferror(stdin) ? 2 : 0;
+ }
+ 
++int serve(const std::string &path) {
++    std::error_code error;
++    if (std::filesystem::is_directory(ps2::os::path(path), error))
++        return serve_image<ps2::disc::TocaDvdDirectory>(path);
++#ifdef PS2_DVD_CHD
++    return serve_image<ps2::disc::DvdChd>(path);
++#else
++    std::fprintf(stderr, "[disc] This reader was built without DVD CHD support.\n");
++    return 3;
++#endif
++}
++
+ }
+ 
+ #ifdef _WIN32
+diff --git a/host/main.cpp b/host/main.cpp
+--- a/host/main.cpp
++++ b/host/main.cpp
+@@ -780,12 +780,15 @@
+         argv = utf8_argv.data();
+     }
+ #endif
+-    if (argc > 1 && std::string_view(argv[1]) == "--decode-dvd-chd") {
++    const std::string_view command = argc > 1 ? argv[1] : "";
++    if (command == "--decode-dvd-folder" || command == "--decode-dvd-chd") {
+         if (argc != 3) return 2;
++#ifdef _WIN32
++        if (_setmode(_fileno(stdout), _O_BINARY) == -1) return 2;
++#endif
++        if (command == "--decode-dvd-folder")
++            return ps2::disc::write_dvd_folder(argv[2], stdout) ? 0 : 2;
+ #ifdef PS2_DVD_CHD
+-#ifdef _WIN32
+-        if (_setmode(_fileno(stdout), _O_BINARY) == -1) return 2;
+-#endif
+         return ps2::disc::write_dvd_chd(argv[2], stdout) ? 0 : 2;
+ #else
+         std::fprintf(stderr, "[disc] This runner was built without DVD CHD support.\n");
+diff --git a/runtime/include/ps2/disc.hpp b/runtime/include/ps2/disc.hpp
+--- a/runtime/include/ps2/disc.hpp
++++ b/runtime/include/ps2/disc.hpp
+@@ -22,6 +22,7 @@
+ using Probe = std::function<bool(std::uint64_t offset, std::size_t size)>;
+ 
+ bool open(const std::string &path);
++bool write_dvd_folder(const std::string &path, std::FILE *output);
+ #ifdef PS2_DVD_CHD
+ bool write_dvd_chd(const std::string &path, std::FILE *output);
+ #endif
+diff --git a/runtime/src/disc.cpp b/runtime/src/disc.cpp
+--- a/runtime/src/disc.cpp
++++ b/runtime/src/disc.cpp
+@@ -2,6 +2,7 @@
+ #include "ps2/hitch.hpp"
+ #include "ps2/os.hpp"
+ #include "load_stats.hpp"
++#include "toca_dvd_directory.hpp"
+ #ifdef PS2_DVD_CHD
+ #include "dvd_chd.hpp"
+ #endif
+@@ -100,6 +101,14 @@
+ }
+ 
+ bool open(const std::string &path) {
++    std::error_code error;
++    if (std::filesystem::is_directory(os::path(path), error)) {
++        auto image = std::make_shared<TocaDvdDirectory>();
++        if (!image->open(path)) return false;
++        return open(path, image->size(), [image](std::uint64_t offset, void *out, std::size_t bytes) {
++            return image->read(offset, out, bytes);
++        });
++    }
+ #ifdef PS2_DVD_CHD
+     if (upper(os::utf8(os::path(path).extension())) == ".CHD") {
+         auto image = std::make_shared<DvdChd>();
+@@ -135,9 +144,10 @@
+     });
+ }
+ 
+-#ifdef PS2_DVD_CHD
+-bool write_dvd_chd(const std::string &path, std::FILE *output) {
+-    DvdChd image;
++namespace {
++template <class Dvd>
++bool write_dvd(const std::string &path, std::FILE *output) {
++    Dvd image;
+     if (!image.open(path)) return false;
+     std::vector<std::uint8_t> chunk(1024 * 1024);
+     for (std::uint64_t offset = 0; offset < image.size(); offset += chunk.size()) {
+@@ -150,6 +160,16 @@
+         if (std::fwrite(chunk.data(), 1, count, output) != count) return false;
+     }
+     return std::fflush(output) == 0;
++}
++}
++
++bool write_dvd_folder(const std::string &path, std::FILE *output) {
++    return write_dvd<TocaDvdDirectory>(path, output);
++}
++
++#ifdef PS2_DVD_CHD
++bool write_dvd_chd(const std::string &path, std::FILE *output) {
++    return write_dvd<DvdChd>(path, output);
+ }
+ #endif
+ 
+diff --git a/runtime/src/toca_dvd_directory.hpp b/runtime/src/toca_dvd_directory.hpp
+new file mode 100644
+--- /dev/null
++++ b/runtime/src/toca_dvd_directory.hpp
+@@ -0,0 +1,182 @@
++#pragma once
++
++#include "ps2/disc.hpp"
++#include "ps2/os.hpp"
++
++#include <algorithm>
++#include <array>
++#include <cstring>
++#include <memory>
++#include <string_view>
++
++#ifdef _WIN32
++#include <share.h>
++#endif
++
++namespace ps2::disc {
++
++// An ISO 9660 view of the extracted files. Keep the original file sectors so
++// the game's raw archive reads still land in the right files.
++class TocaDvdDirectory {
++public:
++    bool open(const std::string &path) {
++        const auto root = os::path(path);
++        extents_.reserve(std::size(kFiles));
++        for (const auto &entry : kFiles) {
++            const auto file_path = root / entry.path;
++            std::error_code error;
++            const auto size = std::filesystem::file_size(file_path, error);
++            if (error || size != entry.size) {
++                std::fprintf(stderr, "[disc] %s: expected a readable %u-byte file\n",
++                             os::utf8(file_path).c_str(), entry.size);
++                return false;
++            }
++#ifdef _WIN32
++            File file(_wfsopen(file_path.c_str(), L"rb", _SH_DENYWR), std::fclose);
++#else
++            File file(std::fopen(file_path.c_str(), "rb"), std::fclose);
++#endif
++            if (!file) {
++                std::fprintf(stderr, "[disc] %s: cannot open for reading\n", os::utf8(file_path).c_str());
++                return false;
++            }
++            const auto start = static_cast<std::uint64_t>(entry.sector) * kSector;
++            extents_.push_back({start, start + entry.size, std::move(file)});
++        }
++        return build_metadata();
++    }
++
++    std::uint64_t size() const { return static_cast<std::uint64_t>(kSectors) * kSector; }
++
++    std::size_t read(std::uint64_t offset, void *output, std::size_t count) {
++        if (offset >= size()) return 0;
++        const auto wanted = static_cast<std::size_t>(std::min<std::uint64_t>(count, size() - offset));
++        const auto end = offset + wanted;
++        auto *out = static_cast<std::uint8_t *>(output);
++        std::memset(out, 0, wanted);
++        if (offset < metadata_.size()) {
++            const auto length = static_cast<std::size_t>(std::min<std::uint64_t>(end, metadata_.size()) - offset);
++            std::memcpy(out, metadata_.data() + offset, length);
++        }
++        auto extent = std::lower_bound(extents_.begin(), extents_.end(), offset,
++                                       [](const Extent &file, auto at) { return file.end <= at; });
++        for (; extent != extents_.end() && extent->start < end; ++extent) {
++            const auto start = std::max(offset, extent->start);
++            const auto length = static_cast<std::size_t>(std::min(end, extent->end) - start);
++            if (std::fseek(extent->file.get(), static_cast<long>(start - extent->start), SEEK_SET) != 0) return start - offset;
++            const auto got = std::fread(out + (start - offset), 1, length, extent->file.get());
++            if (got != length) return start - offset + got;
++        }
++        return wanted;
++    }
++
++private:
++    struct FileEntry { std::uint32_t sector, size; const char *path; };
++    static constexpr FileEntry kFiles[] = {
++#include "toca_dvd_files.inc"
++    };
++    static constexpr std::uint32_t kSectors = 2293888;
++    static constexpr std::uint32_t kRoot = 20;
++    static constexpr std::string_view kDirectories[] = {
++        "", "CNF", "LICENSE", "MODULES", "NETGUI", "MODULES/SCEA", "NETGUI/IOPMODS"
++    };
++    using File = std::unique_ptr<std::FILE, decltype(&std::fclose)>;
++    struct Extent { std::uint64_t start, end; File file; };
++    struct Record { std::string name; std::uint32_t sector, size; bool directory; };
++    std::vector<Extent> extents_;
++    std::array<std::uint8_t, (kRoot + std::size(kDirectories)) * kSector> metadata_{};
++
++    static std::string_view parent(std::string_view path) {
++        const auto slash = path.rfind('/');
++        return slash == path.npos ? std::string_view{} : path.substr(0, slash);
++    }
++    static std::string_view filename(std::string_view path) {
++        const auto slash = path.rfind('/');
++        return slash == path.npos ? path : path.substr(slash + 1);
++    }
++    static std::uint32_t directory_index(std::string_view path) {
++        return static_cast<std::uint32_t>(std::find(std::begin(kDirectories), std::end(kDirectories), path) -
++                                          std::begin(kDirectories));
++    }
++    static void integer(std::uint8_t *out, std::uint32_t value, unsigned bytes, bool big) {
++        for (unsigned i = 0; i < bytes; ++i) out[big ? bytes - i - 1 : i] = static_cast<std::uint8_t>(value >> (i * 8));
++    }
++    static void both(std::uint8_t *out, std::uint32_t value, unsigned bytes) {
++        integer(out, value, bytes, false);
++        integer(out + bytes, value, bytes, true);
++    }
++    static std::size_t record_size(const Record &entry) { return (34 + entry.name.size()) & ~std::size_t{1}; }
++    static void record(std::uint8_t *out, const Record &entry) {
++        out[0] = static_cast<std::uint8_t>(record_size(entry));
++        both(out + 2, entry.sector, 4);
++        both(out + 10, entry.size, 4);
++        const std::uint8_t date[] = {104, 1, 1, 0, 0, 0, 0};
++        std::memcpy(out + 18, date, sizeof date);
++        out[25] = entry.directory ? 2 : 0;
++        both(out + 28, 1, 2);
++        out[32] = static_cast<std::uint8_t>(entry.name.size());
++        std::memcpy(out + 33, entry.name.data(), entry.name.size());
++    }
++    std::uint8_t *sector(std::uint32_t address) { return metadata_.data() + address * kSector; }
++
++    std::uint32_t path_table(std::uint8_t *out, bool big) {
++        std::uint32_t length = 0;
++        for (std::uint32_t i = 0; i < std::size(kDirectories); ++i) {
++            const auto name = i == 0 ? std::string_view("\0", 1) : filename(kDirectories[i]);
++            auto *row = out + length;
++            row[0] = static_cast<std::uint8_t>(name.size());
++            integer(row + 2, kRoot + i, 4, big);
++            integer(row + 6, directory_index(parent(kDirectories[i])) + 1, 2, big);
++            std::memcpy(row + 8, name.data(), name.size());
++            length += static_cast<std::uint32_t>((9 + name.size()) & ~std::size_t{1});
++        }
++        return length;
++    }
++
++    bool build_metadata() {
++        auto *pvd = sector(16);
++        std::memcpy(pvd, "\x01" "CD001\x01", 7);
++        std::fill(pvd + 8, pvd + 72, ' ');
++        std::memcpy(pvd + 8, "PLAYSTATION", 11);
++        std::memcpy(pvd + 40, "SLUS_211.82", 11);
++        both(pvd + 80, kSectors, 4);
++        both(pvd + 120, 1, 2);
++        both(pvd + 124, 1, 2);
++        both(pvd + 128, kSector, 2);
++        const auto table_size = path_table(sector(18), false);
++        path_table(sector(19), true);
++        both(pvd + 132, table_size, 4);
++        integer(pvd + 140, 18, 4, false);
++        integer(pvd + 148, 19, 4, true);
++        record(pvd + 156, {std::string(1, '\0'), kRoot, kSector, true});
++        std::fill(pvd + 190, pvd + 813, ' ');
++        for (unsigned i = 0; i < 4; ++i) std::fill_n(pvd + 813 + 17 * i, 16, '0');
++        pvd[881] = 1;
++        std::memcpy(sector(17), "\xff" "CD001\x01", 7);
++
++        for (std::uint32_t d = 0; d < std::size(kDirectories); ++d) {
++            const auto prefix = kDirectories[d];
++            std::vector<Record> rows{
++                {std::string(1, '\0'), kRoot + d, kSector, true},
++                {std::string(1, '\1'), kRoot + directory_index(parent(prefix)), kSector, true}
++            };
++            for (std::uint32_t i = 1; i < std::size(kDirectories); ++i)
++                if (parent(kDirectories[i]) == prefix)
++                    rows.push_back({std::string(filename(kDirectories[i])), kRoot + i, kSector, true});
++            for (const auto &entry : kFiles)
++                if (parent(entry.path) == prefix)
++                    rows.push_back({std::string(filename(entry.path)) + ";1", entry.sector, entry.size, false});
++            std::sort(rows.begin() + 2, rows.end(), [](const Record &a, const Record &b) { return a.name < b.name; });
++            std::size_t offset = 0;
++            for (const auto &row : rows) {
++                const auto length = record_size(row);
++                if (offset + length > kSector) return false;
++                record(sector(kRoot + d) + offset, row);
++                offset += length;
++            }
++        }
++        return true;
++    }
++};
++
++}
+diff --git a/runtime/src/toca_dvd_files.inc b/runtime/src/toca_dvd_files.inc
+new file mode 100644
+--- /dev/null
++++ b/runtime/src/toca_dvd_files.inc
+@@ -0,0 +1,68 @@
++// File locations and byte lengths for SLUS-21182 v1.02, ordered by LBA.
++    {370, 860160, "NETGUI/BG.RGB"},
++    {790, 1146880, "NETGUI/BG2.RGB"},
++    {1350, 983040, "NETGUI/BG_PAL.RGB"},
++    {1830, 127536, "NETGUI/EFF.BD"},
++    {1893, 560, "NETGUI/EFF.HD"},
++    {1894, 637456, "NETGUI/EUROPEAN.PF"},
++    {2206, 14309, "NETGUI/IOPMODS/DEV9.IRX"},
++    {2213, 11609, "NETGUI/IOPMODS/EZMIDI.IRX"},
++    {2219, 143661, "NETGUI/IOPMODS/INET.IRX"},
++    {2290, 24861, "NETGUI/IOPMODS/INETCTL.IRX"},
++    {2303, 278305, "NETGUI/IOPMODS/IOPRP300.IMG"},
++    {2439, 6693, "NETGUI/IOPMODS/LIBNET.IRX"},
++    {2443, 30085, "NETGUI/IOPMODS/LIBSD.IRX"},
++    {2458, 96181, "NETGUI/IOPMODS/MCMAN.IRX"},
++    {2505, 7385, "NETGUI/IOPMODS/MCSERV.IRX"},
++    {2509, 63037, "NETGUI/IOPMODS/MODHSYN.IRX"},
++    {2540, 21941, "NETGUI/IOPMODS/MODMIDI.IRX"},
++    {2551, 8105, "NETGUI/IOPMODS/MSIFRPC.IRX"},
++    {2555, 65909, "NETGUI/IOPMODS/NETCNF.IRX"},
++    {2588, 31093, "NETGUI/IOPMODS/NTGUI2.IRX"},
++    {2604, 45925, "NETGUI/IOPMODS/PADMAN.IRX"},
++    {2627, 102589, "NETGUI/IOPMODS/PPP.IRX"},
++    {2678, 17305, "NETGUI/IOPMODS/PPPOE.IRX"},
++    {2687, 9161, "NETGUI/IOPMODS/SDRDRV.IRX"},
++    {2692, 6641, "NETGUI/IOPMODS/SIO2MAN.IRX"},
++    {2696, 17089, "NETGUI/IOPMODS/SMAP.IRX"},
++    {2705, 34993, "NETGUI/IOPMODS/USBD.IRX"},
++    {2723, 12853, "NETGUI/IOPMODS/USBKB.IRX"},
++    {2730, 2607936, "NETGUI/JAPANESE.PF"},
++    {4004, 131072, "NETGUI/JIS2UCS.BIN"},
++    {4068, 4251264, "NETGUI/KOREAN.PF"},
++    {6144, 4817944, "NETGUI/NTGUI.ELF"},
++    {8497, 131072, "NETGUI/UCS2JIS.BIN"},
++    {8561, 12689, "LICENSE/LIBEENET.TXT"},
++    {8568, 75, "SYSTEM.CNF"},
++    {8569, 4439976, "SLUS_211.82"},
++    {10737, 33521, "MODULES/CDVDSTM.IRX"},
++    {10754, 14309, "MODULES/DEV9.IRX"},
++    {10761, 282513, "MODULES/DNAS300.IMG"},
++    {10899, 21813, "MODULES/EENETCTL.IRX"},
++    {10910, 13445, "MODULES/ENT_DEVM.IRX"},
++    {10917, 31357, "MODULES/ENT_SMAP.IRX"},
++    {10933, 9109, "MODULES/EZENTCTL.IRX"},
++    {10938, 7909, "MODULES/EZNETCNF.IRX"},
++    {10942, 275345, "MODULES/IOPRP300.IMG"},
++    {11077, 49933, "MODULES/LGAUD.IRX"},
++    {11102, 50869, "MODULES/LGDEV.IRX"},
++    {11127, 30085, "MODULES/LIBSD.IRX"},
++    {11142, 96181, "MODULES/MCMAN.IRX"},
++    {11189, 7385, "MODULES/MCSERV.IRX"},
++    {11193, 7624, "MODULES/MOUSE.IRX"},
++    {11197, 65909, "MODULES/NETCNF.IRX"},
++    {11230, 45925, "MODULES/PADMAN.IRX"},
++    {11253, 1298972, "MODULES/SCEA/DNASDLL.REL"},
++    {11888, 9161, "MODULES/SDRDRV.IRX"},
++    {11893, 6641, "MODULES/SIO2MAN.IRX"},
++    {11897, 181900, "MODULES/SOUND.IRX"},
++    {11986, 34993, "MODULES/USBD.IRX"},
++    {12004, 12853, "MODULES/USBKB.IRX"},
++    {12011, 14809, "MODULES/USBMLOAD.IRX"},
++    {12019, 964, "CNF/ICON_EN.SYS"},
++    {12020, 964, "CNF/ICON_JP.SYS"},
++    {12021, 33688, "CNF/SYS_NET.ICO"},
++    {17632, 65536, "RDH.DIR"},
++    {17664, 1546313728, "RDH_0.HUG"},
++    {773120, 1546352640, "RDH_1.HUG"},
++    {1528576, 1546364928, "RDH_2.HUG"},
+diff --git a/scripts/disc.py b/scripts/disc.py
+--- a/scripts/disc.py
++++ b/scripts/disc.py
+@@ -28,7 +28,7 @@
+     return os.path.commonpath([base, target]) == base
+ 
+ 
+-class ChdFile:
++class DvdReader:
+     """A read-only view of the decoded DVD, backed by the native CHD reader."""
+ 
+     max_read = 4 * 1024 * 1024
+@@ -36,7 +36,7 @@
+     def __init__(self, path):
+         reader = os.environ.get('PS2_DVD_READER')
+         if not reader:
+-            raise OSError('DVD CHD input requires PS2_DVD_READER')
++            raise OSError('DVD CHD or extracted-folder input requires PS2_DVD_READER')
+         self.path = path
+         self.pos = 0
+         self.process = subprocess.Popen([reader, path], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+@@ -46,7 +46,7 @@
+                 raise ValueError('invalid DVD size')
+         except ValueError as error:
+             self.close()
+-            raise OSError(f'{path}: could not open DVD CHD') from error
++            raise OSError(f'{path}: could not open DVD source') from error
+ 
+     def seek(self, offset):
+         if offset < 0:
+@@ -93,8 +93,8 @@
+ class Image:
+     def __init__(self, path):
+         self.path = path
+-        if path.lower().endswith('.chd'):
+-            self.file = ChdFile(path)
++        if os.path.isdir(path) or path.lower().endswith('.chd'):
++            self.file = DvdReader(path)
+             self.size = self.file.size
+         else:
+             self.file = open(path, 'rb')
+diff --git a/scripts/port.sh b/scripts/port.sh
+--- a/scripts/port.sh
++++ b/scripts/port.sh
+@@ -9,7 +9,7 @@
+ 
+ usage() {
+   cat <<'EOF'
+-usage: scripts/port.sh <name> <game.iso | game.chd | game.bin | game.cue | game.zip | game.7z> [options]
++usage: scripts/port.sh <name> <game.iso | game.chd | extracted-folder | game.bin | game.cue | game.zip | game.7z> [options]
+ 
+ Turns a PS2 disc image you own into a browser build in build/web-<name> and a
+ native one in build/native-<name>. It reads the boot program named in
+@@ -24,8 +24,8 @@
+   --rounds N         exploring runs at most (default 8)
+   --no-explore       translate and build without running the game
+   --native-only      skip the browser build and the Emscripten SDK it needs
+-  --chd-sha256 HASH  verify the decoded DVD before extracting the boot program
+-                     (.chd needs --native-only and PS2_LIBCHDR_DIR)
++  --dvd-sha256 HASH  verify the decoded DVD before extracting the boot program
++                     (CHD or extracted TOCA SLUS-21182 v1.02 folder, alias --chd-sha256)
+   --pnach FILE       apply a PCSX2 patch file, repeatable; patches that land in
+                      the executable are translated with it, the rest are
+                      written into memory at boot or every frame
+@@ -44,7 +44,7 @@
+ if ! [[ "$name" =~ ^[A-Za-z0-9._-]+$ ]] || [[ "$name" == .* ]]; then
+   echo "game name '$name': use letters, digits, . _ and - only, not starting with a dot" >&2; exit 2
+ fi
+-frames=3600; rounds=8; explore=1; web=1; presses=(); pnach=(); wide=(); chd_sha256=
++frames=3600; rounds=8; explore=1; web=1; presses=(); pnach=(); wide=(); dvd_sha256=
+ while [ $# -gt 0 ]; do
+   case "$1" in
+     --frames) frames="$2"; shift ;;
+@@ -52,9 +52,9 @@
+     --rounds) rounds="$2"; shift ;;
+     --no-explore) explore=0 ;;
+     --native-only) web=0 ;;
+-    --chd-sha256)
+-      chd_sha256="${2:-}"
+-      [[ "$chd_sha256" =~ ^[0-9a-fA-F]{64}$ ]] || { echo "--chd-sha256 needs a 64-digit hex digest" >&2; exit 2; }
++    --dvd-sha256|--chd-sha256)
++      dvd_sha256="${2:-}"
++      [[ "$dvd_sha256" =~ ^[0-9a-fA-F]{64}$ ]] || { echo "$1 needs a 64-digit hex digest" >&2; exit 2; }
+       shift ;;
+     --pnach) [ -f "$2" ] || { echo "$2: no such file" >&2; exit 1; }; pnach+=("$(cd "$(dirname "$2")" && pwd)/$(basename "$2")"); shift ;;
+     --pnach-section) pnach=(--section "$2" "${pnach[@]}"); shift ;;
+@@ -84,36 +84,43 @@
+ native="$ROOT/build/native-$name"
+ tools="$ROOT/build/tools"
+ export EMSDK="${EMSDK:-$ROOT/tools/emsdk}"
+-chd=0
+-chd_flags=()
+-case "${source_path,,}" in
+-  *.chd)
+-    chd=1
+-    [ "$web" = 0 ] || { echo "DVD CHD setup requires --native-only" >&2; exit 2; }
+-    [ -f "$source_path" ] || { echo "$source_path: no such file" >&2; exit 2; }
+-    [ -n "${PS2_LIBCHDR_DIR:-}" ] && [ -f "$PS2_LIBCHDR_DIR/CMakeLists.txt" ] ||
+-      { echo "DVD CHD setup requires PS2_LIBCHDR_DIR to name the libchdr source directory" >&2; exit 2; }
+-    chd_flags=(-DPS2_LIBCHDR_DIR="$(cd "$PS2_LIBCHDR_DIR" && pwd)")
++dvd_mode=
++dvd_flags=()
++if [ -d "$source_path" ]; then
++  dvd_mode=folder
++  [ -n "$dvd_sha256" ] || { echo "Extracted-folder setup requires its reference --dvd-sha256" >&2; exit 2; }
++elif [[ "${source_path,,}" == *.chd ]]; then
++  dvd_mode=chd
++  [ -f "$source_path" ] || { echo "$source_path: no such file" >&2; exit 2; }
++else
++  [ -z "$dvd_sha256" ] || { echo "--dvd-sha256 requires a DVD CHD or extracted folder" >&2; exit 2; }
++  [ -e "$source_path" ] || [ -e "$game/disc.iso" ] || { echo "$source_path: no such file" >&2; exit 1; }
++fi
++if [ -n "$dvd_mode" ]; then
++  [ "$web" = 0 ] || { echo "DVD CHD and extracted-folder setup require --native-only" >&2; exit 2; }
++  if [ -n "${PS2_LIBCHDR_DIR:-}" ]; then
++    [ -f "$PS2_LIBCHDR_DIR/CMakeLists.txt" ] || { echo "PS2_LIBCHDR_DIR must name the libchdr source directory" >&2; exit 2; }
++    dvd_flags=(-DPS2_LIBCHDR_DIR="$(cd "$PS2_LIBCHDR_DIR" && pwd)")
+     if [ "$windows" = 1 ] && [ -z "${CC:-}" ]; then
+       clang_c=$(command -v clang.exe) || { echo "Set CC to the C compiler paired with the Windows clang++ toolchain" >&2; exit 2; }
+-      chd_flags+=(-DCMAKE_C_COMPILER="$clang_c")
++      dvd_flags+=(-DCMAKE_C_COMPILER="$clang_c")
+     fi
+-    ;;
+-  *)
+-    [ -z "$chd_sha256" ] || { echo "--chd-sha256 requires a DVD CHD" >&2; exit 2; }
+-    [ -e "$source_path" ] || [ -e "$game/disc.iso" ] || { echo "$source_path: no such file" >&2; exit 1; }
+-    ;;
+-esac
++  else
++    [ "$dvd_mode" != chd ] || { echo "DVD CHD setup requires PS2_LIBCHDR_DIR" >&2; exit 2; }
++    dvd_flags=(-DPS2_LIBCHDR_DIR=)
++  fi
++fi
+ ninja_jobs=
+ if [ -n "${PS2_JOBS:-}" ]; then
+   case "$PS2_JOBS" in ''|*[!0-9]*|0*) echo "PS2_JOBS=$PS2_JOBS: expected a positive number" >&2; exit 2 ;; esac
+   ninja_jobs="-j$PS2_JOBS"
+ fi
+-if [ "$chd" = 1 ]; then
++if [ -n "$dvd_mode" ]; then
+   # The reader builds before any game-specific files exist.
+   . "$here/cxx.sh"
+   reader_build="$ROOT/build/dvd-reader"
+-  cmake -S "$ROOT" -B "$reader_build" -G Ninja -DCMAKE_BUILD_TYPE=Release "${cxx_flags[@]}" "${chd_flags[@]}" > /dev/null
++  [ "$dvd_mode" != folder ] || reader_build="$ROOT/build/dvd-reader-folder"
++  cmake -S "$ROOT" -B "$reader_build" -G Ninja -DCMAKE_BUILD_TYPE=Release "${cxx_flags[@]}" "${dvd_flags[@]}" > /dev/null
+   ninja -C "$reader_build" ${ninja_jobs:-} ps2dvdread
+   if [ "$windows" = 1 ]; then
+     PS2_DVD_READER="$(cd "$reader_build" && pwd -W)/ps2dvdread.exe"
+@@ -121,9 +128,9 @@
+     PS2_DVD_READER="$reader_build/ps2dvdread"
+   fi
+   export PS2_DVD_READER
+-  if [ -n "$chd_sha256" ]; then
++  if [ -n "$dvd_sha256" ]; then
+     actual=$("${py[@]}" -I "$here/disc.py" sha256 "$source_path") || exit 2
+-    [ "$actual" = "${chd_sha256,,}" ] || { echo "$source_path: decoded DVD SHA-256 is $actual, expected ${chd_sha256,,}" >&2; exit 2; }
++    [ "$actual" = "${dvd_sha256,,}" ] || { echo "$source_path: decoded DVD SHA-256 is $actual, expected ${dvd_sha256,,}" >&2; exit 2; }
+     echo "Verified decoded DVD SHA-256 $actual"
+   fi
+ fi
+@@ -134,7 +141,9 @@
+ 
+ echo "== [1/6] disc"
+ iso="$game/disc.iso"
+-if [ "$chd" = 1 ]; then
++if [ "$dvd_mode" = folder ]; then
++  if [ "$windows" = 0 ]; then iso=$(cd "$source_path" && pwd); else iso=$(cd "$source_path" && pwd -W); fi
++elif [ "$dvd_mode" = chd ]; then
+   if [ "$windows" = 0 ]; then dir=$(cd "$(dirname "$source_path")" && pwd); else dir=$(cd "$(dirname "$source_path")" && pwd -W); fi
+   iso="$dir/$(basename "$source_path")"
+ elif [ -e "$iso" ]; then
+@@ -240,7 +249,7 @@
+ 
+ build_native() {
+   . "$here/cxx.sh"
+-  cxx_flags+=("${chd_flags[@]}")
++  cxx_flags+=("${dvd_flags[@]}")
+   shared_runtime
+   config="${cxx_flags[*]} ${runtime_lib:-own runtime}"
+   if [ ! -f "$native/build.ninja" ] || [ "$(cat "$native/.port-config" 2> /dev/null)" != "$config" ]; then

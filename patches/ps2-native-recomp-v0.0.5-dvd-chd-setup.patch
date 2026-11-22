@@ -1,0 +1,350 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -116,6 +116,12 @@
+ if(PS2_LIBCHDR_DIR AND NOT EMSCRIPTEN)
+     enable_language(C)
+     add_subdirectory("${PS2_LIBCHDR_DIR}" libchdr EXCLUDE_FROM_ALL)
++    add_executable(ps2dvdread EXCLUDE_FROM_ALL host/dvd_read.cpp)
++    target_include_directories(ps2dvdread PRIVATE runtime/include runtime/src)
++    target_link_libraries(ps2dvdread PRIVATE chdr-static)
++    if(WIN32)
++        target_link_options(ps2dvdread PRIVATE -municode)
++    endif()
+     if(PS2_PREBUILT)
+         target_link_libraries(ps2runtime INTERFACE "$<LINK_ONLY:chdr-static>")
+     else()
+diff --git a/host/dvd_read.cpp b/host/dvd_read.cpp
+new file mode 100644
+--- /dev/null
++++ b/host/dvd_read.cpp
+@@ -0,0 +1,48 @@
++#include "dvd_chd.hpp"
++
++#ifdef _WIN32
++#include <fcntl.h>
++#endif
++
++namespace {
++
++constexpr std::size_t kReadLimit = 4 * 1024 * 1024;
++
++// Setup reads from one open image. The first line is the decoded size. Each
++// request is a byte offset and count, followed by exactly that many bytes.
++int serve(const std::string &path) {
++    ps2::disc::DvdChd dvd;
++    if (!dvd.open(path)) return 2;
++    if (std::printf("%llu\n", static_cast<unsigned long long>(dvd.size())) < 0 ||
++        std::fflush(stdout) != 0) return 2;
++
++    std::vector<std::uint8_t> buffer(kReadLimit);
++    char line[96];
++    while (std::fgets(line, sizeof line, stdin)) {
++        unsigned long long offset = 0;
++        unsigned long long count = 0;
++        char trailing;
++        if (std::sscanf(line, "%llu %llu %c", &offset, &count, &trailing) != 2 ||
++            count == 0 || count > kReadLimit || offset > dvd.size() || count > dvd.size() - offset) return 2;
++        const auto size = static_cast<std::size_t>(count);
++        if (dvd.read(offset, buffer.data(), size) != size) {
++            std::fprintf(stderr, "[disc] %s: cannot read DVD data at byte %llu\n", path.c_str(), offset);
++            return 2;
++        }
++        if (std::fwrite(buffer.data(), 1, size, stdout) != size || std::fflush(stdout) != 0) return 2;
++    }
++    return std::ferror(stdin) ? 2 : 0;
++}
++
++}
++
++#ifdef _WIN32
++int wmain(int argc, wchar_t **argv) {
++    if (argc != 2 || _setmode(_fileno(stdout), _O_BINARY) == -1) return 2;
++    return serve(ps2::os::utf8(argv[1]));
++}
++#else
++int main(int argc, char **argv) {
++    return argc == 2 ? serve(argv[1]) : 2;
++}
++#endif
+diff --git a/scripts/disc.py b/scripts/disc.py
+--- a/scripts/disc.py
++++ b/scripts/disc.py
+@@ -1,8 +1,10 @@
+ import argparse
+ import fnmatch
++import hashlib
+ import os
+ import shutil
+ import struct
++import subprocess
+ import sys
+ import zipfile
+ 
+@@ -24,6 +26,59 @@
+     base = os.path.realpath(destination)
+     target = os.path.realpath(os.path.join(base, path))
+     return os.path.commonpath([base, target]) == base
++
++
++class ChdFile:
++    """A read-only view of the decoded DVD, backed by the native CHD reader."""
++
++    max_read = 4 * 1024 * 1024
++
++    def __init__(self, path):
++        reader = os.environ.get('PS2_DVD_READER')
++        if not reader:
++            raise OSError('DVD CHD input requires PS2_DVD_READER')
++        self.path = path
++        self.pos = 0
++        self.process = subprocess.Popen([reader, path], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
++        try:
++            self.size = int(self.process.stdout.readline(32))
++            if self.size <= 0:
++                raise ValueError('invalid DVD size')
++        except ValueError as error:
++            self.close()
++            raise OSError(f'{path}: could not open DVD CHD') from error
++
++    def seek(self, offset):
++        if offset < 0:
++            raise ValueError('negative DVD seek')
++        self.pos = offset
++
++    def read(self, size):
++        remaining = min(size, self.size - self.pos)
++        data = bytearray()
++        while remaining > 0:
++            count = min(remaining, self.max_read)
++            try:
++                self.process.stdin.write(f'{self.pos} {count}\n'.encode('ascii'))
++                self.process.stdin.flush()
++                chunk = self.process.stdout.read(count)
++                if len(chunk) != count:
++                    raise OSError('short read from DVD reader')
++            except OSError as error:
++                raise OSError(f'{self.path}: cannot decode DVD at byte {self.pos}') from error
++            data.extend(chunk)
++            self.pos += count
++            remaining -= count
++        return data
++
++    def close(self):
++        try:
++            self.process.stdin.close()
++        except BrokenPipeError:
++            pass
++        finally:
++            self.process.stdout.close()
++            self.process.wait()
+ 
+ 
+ class Layer:
+@@ -38,14 +93,22 @@
+ class Image:
+     def __init__(self, path):
+         self.path = path
+-        self.file = open(path, 'rb')
+-        self.size = os.path.getsize(path)
+-        self.layers = [Layer(0, 0, self.pvd(16))]
+-        first = self.layers[0].sectors
+-        for sector in range(first, min(first + 64, self.size // SECTOR)):
+-            if self.read(sector, 1)[:6] == b'\x01CD001':
+-                self.layers.append(Layer(1, sector - 16, self.read(sector, 1)))
+-                break
++        if path.lower().endswith('.chd'):
++            self.file = ChdFile(path)
++            self.size = self.file.size
++        else:
++            self.file = open(path, 'rb')
++            self.size = os.fstat(self.file.fileno()).st_size
++        try:
++            self.layers = [Layer(0, 0, self.pvd(16))]
++            first = self.layers[0].sectors
++            for sector in range(first, min(first + 64, self.size // SECTOR)):
++                if self.read(sector, 1)[:6] == b'\x01CD001':
++                    self.layers.append(Layer(1, sector - 16, self.read(sector, 1)))
++                    break
++        except BaseException:
++            self.file.close()
++            raise
+ 
+     def read(self, sector, count):
+         self.file.seek(sector * SECTOR)
+@@ -244,7 +307,7 @@
+ def main():
+     sys.stdout.reconfigure(newline='\n')
+     parser = argparse.ArgumentParser(description='Read files from PS2 CD and DVD images, including both layers of a DVD9.')
+-    parser.add_argument('command', choices=['info', 'list', 'extract', 'modules', 'iso'])
++    parser.add_argument('command', choices=['info', 'list', 'extract', 'modules', 'iso', 'sha256'])
+     parser.add_argument('image')
+     parser.add_argument('destination', nargs='?')
+     parser.add_argument('patterns', nargs='*', help='paths or globs to extract, everything below --limit if omitted')
+@@ -256,19 +319,31 @@
+             parser.error('iso needs the .iso file to write')
+         to_iso(args.image, args.destination)
+         return
+-    image = Image(args.image)
+-    if args.command == 'info':
+-        info(image)
+-    elif args.command == 'list':
+-        listing(image)
+-    elif args.command == 'modules':
+-        if not args.destination:
+-            parser.error('modules needs a destination folder')
+-        modules(image, args.destination)
+-    else:
+-        if not args.destination:
+-            parser.error('extract needs a destination folder')
+-        extract(image, args.destination, args.patterns, args.limit << 20)
++    try:
++        image = Image(args.image)
++        try:
++            if args.command == 'sha256':
++                image.file.seek(0)
++                digest = hashlib.sha256()
++                for chunk in iter(lambda: image.file.read(4 * 1024 * 1024), b''):
++                    digest.update(chunk)
++                print(digest.hexdigest())
++            elif args.command == 'info':
++                info(image)
++            elif args.command == 'list':
++                listing(image)
++            elif args.command == 'modules':
++                if not args.destination:
++                    parser.error('modules needs a destination folder')
++                modules(image, args.destination)
++            else:
++                if not args.destination:
++                    parser.error('extract needs a destination folder')
++                extract(image, args.destination, args.patterns, args.limit << 20)
++        finally:
++            image.file.close()
++    except OSError as error:
++        sys.exit(f'disc.py: {error}')
+ 
+ 
+ if __name__ == '__main__':
+diff --git a/scripts/port.sh b/scripts/port.sh
+--- a/scripts/port.sh
++++ b/scripts/port.sh
+@@ -9,7 +9,7 @@
+ 
+ usage() {
+   cat <<'EOF'
+-usage: scripts/port.sh <name> <game.iso | game.bin | game.cue | game.zip | game.7z> [options]
++usage: scripts/port.sh <name> <game.iso | game.chd | game.bin | game.cue | game.zip | game.7z> [options]
+ 
+ Turns a PS2 disc image you own into a browser build in build/web-<name> and a
+ native one in build/native-<name>. It reads the boot program named in
+@@ -24,6 +24,8 @@
+   --rounds N         exploring runs at most (default 8)
+   --no-explore       translate and build without running the game
+   --native-only      skip the browser build and the Emscripten SDK it needs
++  --chd-sha256 HASH  verify the decoded DVD before extracting the boot program
++                     (.chd needs --native-only and PS2_LIBCHDR_DIR)
+   --pnach FILE       apply a PCSX2 patch file, repeatable; patches that land in
+                      the executable are translated with it, the rest are
+                      written into memory at boot or every frame
+@@ -42,7 +44,7 @@
+ if ! [[ "$name" =~ ^[A-Za-z0-9._-]+$ ]] || [[ "$name" == .* ]]; then
+   echo "game name '$name': use letters, digits, . _ and - only, not starting with a dot" >&2; exit 2
+ fi
+-frames=3600; rounds=8; explore=1; web=1; presses=(); pnach=(); wide=()
++frames=3600; rounds=8; explore=1; web=1; presses=(); pnach=(); wide=(); chd_sha256=
+ while [ $# -gt 0 ]; do
+   case "$1" in
+     --frames) frames="$2"; shift ;;
+@@ -50,6 +52,10 @@
+     --rounds) rounds="$2"; shift ;;
+     --no-explore) explore=0 ;;
+     --native-only) web=0 ;;
++    --chd-sha256)
++      chd_sha256="${2:-}"
++      [[ "$chd_sha256" =~ ^[0-9a-fA-F]{64}$ ]] || { echo "--chd-sha256 needs a 64-digit hex digest" >&2; exit 2; }
++      shift ;;
+     --pnach) [ -f "$2" ] || { echo "$2: no such file" >&2; exit 1; }; pnach+=("$(cd "$(dirname "$2")" && pwd)/$(basename "$2")"); shift ;;
+     --pnach-section) pnach=(--section "$2" "${pnach[@]}"); shift ;;
+     --widescreen) wide=(--widescreen) ;;
+@@ -78,7 +84,49 @@
+ native="$ROOT/build/native-$name"
+ tools="$ROOT/build/tools"
+ export EMSDK="${EMSDK:-$ROOT/tools/emsdk}"
+-[ -e "$source_path" ] || [ -e "$game/disc.iso" ] || { echo "$source_path: no such file" >&2; exit 1; }
++chd=0
++chd_flags=()
++case "${source_path,,}" in
++  *.chd)
++    chd=1
++    [ "$web" = 0 ] || { echo "DVD CHD setup requires --native-only" >&2; exit 2; }
++    [ -f "$source_path" ] || { echo "$source_path: no such file" >&2; exit 2; }
++    [ -n "${PS2_LIBCHDR_DIR:-}" ] && [ -f "$PS2_LIBCHDR_DIR/CMakeLists.txt" ] ||
++      { echo "DVD CHD setup requires PS2_LIBCHDR_DIR to name the libchdr source directory" >&2; exit 2; }
++    chd_flags=(-DPS2_LIBCHDR_DIR="$(cd "$PS2_LIBCHDR_DIR" && pwd)")
++    if [ "$windows" = 1 ] && [ -z "${CC:-}" ]; then
++      clang_c=$(command -v clang.exe) || { echo "Set CC to the C compiler paired with the Windows clang++ toolchain" >&2; exit 2; }
++      chd_flags+=(-DCMAKE_C_COMPILER="$clang_c")
++    fi
++    ;;
++  *)
++    [ -z "$chd_sha256" ] || { echo "--chd-sha256 requires a DVD CHD" >&2; exit 2; }
++    [ -e "$source_path" ] || [ -e "$game/disc.iso" ] || { echo "$source_path: no such file" >&2; exit 1; }
++    ;;
++esac
++ninja_jobs=
++if [ -n "${PS2_JOBS:-}" ]; then
++  case "$PS2_JOBS" in ''|*[!0-9]*|0*) echo "PS2_JOBS=$PS2_JOBS: expected a positive number" >&2; exit 2 ;; esac
++  ninja_jobs="-j$PS2_JOBS"
++fi
++if [ "$chd" = 1 ]; then
++  # The reader builds before any game-specific files exist.
++  . "$here/cxx.sh"
++  reader_build="$ROOT/build/dvd-reader"
++  cmake -S "$ROOT" -B "$reader_build" -G Ninja -DCMAKE_BUILD_TYPE=Release "${cxx_flags[@]}" "${chd_flags[@]}" > /dev/null
++  ninja -C "$reader_build" ${ninja_jobs:-} ps2dvdread
++  if [ "$windows" = 1 ]; then
++    PS2_DVD_READER="$(cd "$reader_build" && pwd -W)/ps2dvdread.exe"
++  else
++    PS2_DVD_READER="$reader_build/ps2dvdread"
++  fi
++  export PS2_DVD_READER
++  if [ -n "$chd_sha256" ]; then
++    actual=$("${py[@]}" -I "$here/disc.py" sha256 "$source_path") || exit 2
++    [ "$actual" = "${chd_sha256,,}" ] || { echo "$source_path: decoded DVD SHA-256 is $actual, expected ${chd_sha256,,}" >&2; exit 2; }
++    echo "Verified decoded DVD SHA-256 $actual"
++  fi
++fi
+ setup=()
+ [ "$web" = 1 ] || setup=(--native-only)
+ if { [ "$web" = 1 ] && [ ! -f "$EMSDK/emsdk_env.sh" ]; } || [ ! -x "$tools/eerecomp" ] || [ ! -x "$tools/vurecomp" ]; then "$here/setup.sh" "${setup[@]}"; fi
+@@ -86,7 +134,10 @@
+ 
+ echo "== [1/6] disc"
+ iso="$game/disc.iso"
+-if [ -e "$iso" ]; then
++if [ "$chd" = 1 ]; then
++  if [ "$windows" = 0 ]; then dir=$(cd "$(dirname "$source_path")" && pwd); else dir=$(cd "$(dirname "$source_path")" && pwd -W); fi
++  iso="$dir/$(basename "$source_path")"
++elif [ -e "$iso" ]; then
+   echo "already in place"
+ else
+   case "${source_path,,}" in
+@@ -184,16 +235,12 @@
+ touch "$game/entries.txt"
+ translate
+ 
+-ninja_jobs=
+-if [ -n "${PS2_JOBS:-}" ]; then
+-  case "$PS2_JOBS" in ''|*[!0-9]*|0*) echo "PS2_JOBS=$PS2_JOBS: expected a positive number" >&2; exit 2 ;; esac
+-  ninja_jobs="-j$PS2_JOBS"
+-fi
+ . "$here/runtime.sh"
+ . "$here/build_units.sh"
+ 
+ build_native() {
+   . "$here/cxx.sh"
++  cxx_flags+=("${chd_flags[@]}")
+   shared_runtime
+   config="${cxx_flags[*]} ${runtime_lib:-own runtime}"
+   if [ ! -f "$native/build.ninja" ] || [ "$(cat "$native/.port-config" 2> /dev/null)" != "$config" ]; then

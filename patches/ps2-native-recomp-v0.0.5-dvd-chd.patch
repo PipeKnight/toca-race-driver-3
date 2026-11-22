@@ -1,0 +1,269 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -15,6 +15,7 @@
+ 
+ set(PS2_GENERATED "" CACHE PATH "Folder with the C++ generated for a game")
+ set(PS2_RUNTIME_LIB "" CACHE FILEPATH "libps2runtime.a built earlier from this source tree (scripts/runtime.sh); a game links it instead of compiling the runtime again")
++set(PS2_LIBCHDR_DIR "" CACHE PATH "Optional libchdr source directory for native DVD CHD support")
+ 
+ if(WIN32)
+     add_link_options(-static-libgcc -static-libstdc++)
+@@ -112,6 +113,16 @@
+     target_link_libraries(ps2runtime ${PS2_API} ${CMAKE_DL_LIBS})  # vu_live.cpp loads libraries with dlopen
+ endif()
+ target_include_directories(ps2runtime ${PS2_API} "${CMAKE_CURRENT_SOURCE_DIR}/runtime/include")
++if(PS2_LIBCHDR_DIR AND NOT EMSCRIPTEN)
++    enable_language(C)
++    add_subdirectory("${PS2_LIBCHDR_DIR}" libchdr EXCLUDE_FROM_ALL)
++    if(PS2_PREBUILT)
++        target_link_libraries(ps2runtime INTERFACE "$<LINK_ONLY:chdr-static>")
++    else()
++        target_link_libraries(ps2runtime PRIVATE chdr-static)
++        set_property(SOURCE runtime/src/disc.cpp APPEND PROPERTY COMPILE_DEFINITIONS PS2_DVD_CHD)
++    endif()
++endif()
+ 
+ # the IOP thread manager tested through a synthetic module, no game needed: ninja ps2thbasetest
+ if(NOT EMSCRIPTEN)
+@@ -338,6 +349,9 @@
+ 
+     add_executable(ps2run host/main.cpp)
+     target_link_libraries(ps2run PRIVATE ps2game ps2runtime)
++    if(PS2_LIBCHDR_DIR)
++        set_property(SOURCE host/main.cpp APPEND PROPERTY COMPILE_DEFINITIONS PS2_DVD_CHD)
++    endif()
+     if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+         target_sources(ps2run PRIVATE host/profile.cpp)
+         target_compile_definitions(ps2run PRIVATE PS2_PROFILE)
+diff --git a/host/main.cpp b/host/main.cpp
+--- a/host/main.cpp
++++ b/host/main.cpp
+@@ -780,6 +780,18 @@
+         argv = utf8_argv.data();
+     }
+ #endif
++    if (argc > 1 && std::string_view(argv[1]) == "--decode-dvd-chd") {
++        if (argc != 3) return 2;
++#ifdef PS2_DVD_CHD
++#ifdef _WIN32
++        if (_setmode(_fileno(stdout), _O_BINARY) == -1) return 2;
++#endif
++        return ps2::disc::write_dvd_chd(argv[2], stdout) ? 0 : 2;
++#else
++        std::fprintf(stderr, "[disc] This runner was built without DVD CHD support.\n");
++        return 3;
++#endif
++    }
+     if (argc < 2) return usage();
+     const bool from_disc = argv[1][0] == '-';
+     std::string program = from_disc ? std::string() : argv[1];
+diff --git a/runtime/include/ps2/disc.hpp b/runtime/include/ps2/disc.hpp
+--- a/runtime/include/ps2/disc.hpp
++++ b/runtime/include/ps2/disc.hpp
+@@ -1,6 +1,7 @@
+ #pragma once
+ 
+ #include <cstddef>
++#include <cstdio>
+ #include <cstdint>
+ #include <functional>
+ #include <optional>
+@@ -21,6 +22,9 @@
+ using Probe = std::function<bool(std::uint64_t offset, std::size_t size)>;
+ 
+ bool open(const std::string &path);
++#ifdef PS2_DVD_CHD
++bool write_dvd_chd(const std::string &path, std::FILE *output);
++#endif
+ bool open(const std::string &name, std::uint64_t size, Reader reader, Probe probe = {});
+ bool is_open();
+ bool read(std::uint32_t sector, std::uint32_t count, void *out);
+diff --git a/runtime/src/disc.cpp b/runtime/src/disc.cpp
+--- a/runtime/src/disc.cpp
++++ b/runtime/src/disc.cpp
+@@ -2,12 +2,16 @@
+ #include "ps2/hitch.hpp"
+ #include "ps2/os.hpp"
+ #include "load_stats.hpp"
++#ifdef PS2_DVD_CHD
++#include "dvd_chd.hpp"
++#endif
+ 
+ #include <algorithm>
+ #include <cctype>
+ #include <cstdio>
+ #include <cstring>
+ #include <map>
++#include <memory>
+ #include <set>
+ #include <string_view>
+ 
+@@ -15,7 +19,6 @@
+ 
+ namespace {
+ 
+-std::FILE *g_file = nullptr;
+ Reader g_reader;
+ Probe g_probe;
+ std::uint64_t g_size = 0;
+@@ -97,34 +100,58 @@
+ }
+ 
+ bool open(const std::string &path) {
+-    std::FILE *file = os::open(path, "rb");
++#ifdef PS2_DVD_CHD
++    if (upper(os::utf8(os::path(path).extension())) == ".CHD") {
++        auto image = std::make_shared<DvdChd>();
++        if (!image->open(path)) return false;
++        return open(path, image->size(), [image](std::uint64_t offset, void *out, std::size_t bytes) {
++            return image->read(offset, out, bytes);
++        });
++    }
++#endif
++    const std::shared_ptr<std::FILE> file(os::open(path, "rb"), [](std::FILE *handle) {
++        if (handle) std::fclose(handle);
++    });
+     if (!file) return false;
+ #if defined(_WIN32)
+-    const long long end = _fseeki64(file, 0, SEEK_END) == 0 ? _ftelli64(file) : -1;
++    const long long end = _fseeki64(file.get(), 0, SEEK_END) == 0 ? _ftelli64(file.get()) : -1;
+ #else
+-    const long long end = fseeko(file, 0, SEEK_END) == 0 ? static_cast<long long>(ftello(file)) : -1;
++    const long long end = fseeko(file.get(), 0, SEEK_END) == 0 ? static_cast<long long>(ftello(file.get())) : -1;
+ #endif
+     if (end < 0) {
+         std::fprintf(stderr, "[disc] %s: cannot find the size of the image\n", path.c_str());
+-        std::fclose(file);
+         return false;
+     }
+     // A second image (a disc swap) replaces the first: its file is closed once the reader no longer uses it, so it is neither
+     // leaked nor kept locked.
+-    std::FILE *previous = g_file;
+-    g_file = file;
+-    const bool opened = open(path, static_cast<std::uint64_t>(end), [file](std::uint64_t offset, void *out, std::size_t bytes) -> std::size_t {
++    return open(path, static_cast<std::uint64_t>(end), [file](std::uint64_t offset, void *out, std::size_t bytes) -> std::size_t {
+         // A failed seek reads nothing (read() then says "short read") instead of the sectors at the old position.
+ #if defined(_WIN32)
+-        if (_fseeki64(file, static_cast<long long>(offset), SEEK_SET) != 0) return 0;
++        if (_fseeki64(file.get(), static_cast<long long>(offset), SEEK_SET) != 0) return 0;
+ #else
+-        if (fseeko(file, static_cast<off_t>(offset), SEEK_SET) != 0) return 0;
+-#endif
+-        return std::fread(out, 1, bytes, file);
++        if (fseeko(file.get(), static_cast<off_t>(offset), SEEK_SET) != 0) return 0;
++#endif
++        return std::fread(out, 1, bytes, file.get());
+     });
+-    if (previous) std::fclose(previous);
+-    return opened;
+-}
++}
++
++#ifdef PS2_DVD_CHD
++bool write_dvd_chd(const std::string &path, std::FILE *output) {
++    DvdChd image;
++    if (!image.open(path)) return false;
++    std::vector<std::uint8_t> chunk(1024 * 1024);
++    for (std::uint64_t offset = 0; offset < image.size(); offset += chunk.size()) {
++        const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(chunk.size(), image.size() - offset));
++        if (image.read(offset, chunk.data(), count) != count) {
++            std::fprintf(stderr, "[disc] %s: cannot decode the DVD at byte %llu\n", path.c_str(),
++                         static_cast<unsigned long long>(offset));
++            return false;
++        }
++        if (std::fwrite(chunk.data(), 1, count, output) != count) return false;
++    }
++    return std::fflush(output) == 0;
++}
++#endif
+ 
+ bool open(const std::string &name, std::uint64_t size, Reader reader, Probe probe) {
+     g_reader = std::move(reader);
+diff --git a/runtime/src/dvd_chd.hpp b/runtime/src/dvd_chd.hpp
+new file mode 100644
+--- /dev/null
++++ b/runtime/src/dvd_chd.hpp
+@@ -0,0 +1,82 @@
++#pragma once
++
++#include "ps2/disc.hpp"
++#include "ps2/os.hpp"
++
++#include <libchdr/chd.h>
++
++#include <algorithm>
++#include <cstring>
++#include <limits>
++#include <memory>
++
++namespace ps2::disc {
++
++class DvdChd {
++public:
++    bool open(const std::string &path) {
++        file_.reset(os::open(path, "rb"));
++        if (!file_) return fail(path, "cannot open file");
++
++        chd_file *image = nullptr;
++        const auto open_error = chd_open_file(file_.get(), CHD_OPEN_READ, nullptr, &image);
++        if (open_error != CHDERR_NONE) return fail(path, "cannot open CHD", open_error);
++        image_.reset(image);
++
++        const auto &header = *chd_get_header(image_.get());
++        constexpr std::uint32_t max_hunk_size = 512 * 1024;
++        constexpr std::uint64_t max_dvd_size = 9'000'000'000;
++        if (header.version != 5 || header.unitbytes != kSector ||
++            !header.logicalbytes || header.logicalbytes > max_dvd_size ||
++            header.logicalbytes % kSector || header.hunkbytes % kSector ||
++            !header.hunkbytes || header.hunkbytes > max_hunk_size)
++            return fail(path, "expected a CHDv5 DVD image with 2048-byte sectors");
++
++        char dvd_metadata = 0;
++        if (chd_get_metadata(image_.get(), DVD_METADATA_TAG, 0, &dvd_metadata, sizeof dvd_metadata,
++                             nullptr, nullptr, nullptr) != CHDERR_NONE)
++            return fail(path, "missing DVD metadata");
++
++        size_ = header.logicalbytes;
++        hunk_.resize(header.hunkbytes);
++        return true;
++    }
++
++    std::uint64_t size() const { return size_; }
++
++    std::size_t read(std::uint64_t offset, void *output, std::size_t count) {
++        if (offset >= size_) return 0;
++        const auto wanted = static_cast<std::size_t>(std::min<std::uint64_t>(count, size_ - offset));
++        auto *out = static_cast<std::uint8_t *>(output);
++        std::size_t copied = 0;
++        while (copied < wanted) {
++            const auto position = offset + copied;
++            const auto index = static_cast<std::uint32_t>(position / hunk_.size());
++            if (cached_index_ != index) {
++                cached_index_ = std::numeric_limits<std::uint32_t>::max();
++                if (chd_read(image_.get(), index, hunk_.data()) != CHDERR_NONE) return copied;
++                cached_index_ = index;
++            }
++            const auto start = static_cast<std::size_t>(position % hunk_.size());
++            const auto step = std::min(wanted - copied, hunk_.size() - start);
++            std::memcpy(out + copied, hunk_.data() + start, step);
++            copied += step;
++        }
++        return copied;
++    }
++
++private:
++    static bool fail(const std::string &path, const char *why, chd_error detail = CHDERR_NONE) {
++        std::fprintf(stderr, "[disc] %s: %s%s%s\n", path.c_str(), why,
++                     detail == CHDERR_NONE ? "" : ": ", detail == CHDERR_NONE ? "" : chd_error_string(detail));
++        return false;
++    }
++
++    std::unique_ptr<std::FILE, decltype(&std::fclose)> file_{nullptr, std::fclose};
++    std::unique_ptr<chd_file, decltype(&chd_close)> image_{nullptr, chd_close};
++    std::vector<std::uint8_t> hunk_;
++    std::uint64_t size_ = 0;
++    std::uint32_t cached_index_ = std::numeric_limits<std::uint32_t>::max();
++};
++
++}

@@ -1,0 +1,13 @@
+--- a/runtime/src/iop/spu2.cpp
++++ b/runtime/src/iop/spu2.cpp
+@@ -27,7 +27,9 @@
+ constexpr std::uint32_t kRamWords = 1u << 20;
+ constexpr std::uint32_t kRamMask = kRamWords - 1;
+ constexpr std::uint64_t kCyclesPerSample = 768;
+-constexpr unsigned kBatch = 32;
++// TOCA's sound module can read the envelope during the first 0.4 ms after key-on.
++// Update it every 0.167 ms at 48 kHz so the new voice can advance before that read.
++constexpr unsigned kBatch = 8;
+ constexpr unsigned kInputFrames = 512;
+ constexpr std::uint32_t kInputBase[2] = {0x2000u, 0x2400u};
+ constexpr unsigned kSpuLine = 9;

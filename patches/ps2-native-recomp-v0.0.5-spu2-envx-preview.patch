@@ -1,0 +1,328 @@
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -264,6 +264,13 @@
+     if(WIN32)
+         target_link_libraries(ps2discinputtest PRIVATE synchronization)
+     endif()
++    # Early SPU2 register reads and checkpoint round trips, no game needed: ninja ps2envxstatetest
++    add_executable(ps2envxstatetest EXCLUDE_FROM_ALL tests/spu2_envx_state.cpp)
++    target_include_directories(ps2envxstatetest PRIVATE runtime/src)
++    target_link_libraries(ps2envxstatetest PRIVATE ps2runtime)
++    if(WIN32)
++        target_link_libraries(ps2envxstatetest PRIVATE synchronization)
++    endif()
+     # bad guest pointers and sizes at the IOP's libraries and the SIF cut or refused, no game needed: ninja ps2iopboundstest
+     add_executable(ps2iopboundstest EXCLUDE_FROM_ALL tests/iop_bounds.cpp)
+     target_include_directories(ps2iopboundstest PRIVATE runtime/src)
+--- a/runtime/src/iop/spu2.cpp
++++ b/runtime/src/iop/spu2.cpp
+@@ -67,6 +67,14 @@
+     std::uint32_t position = 0;
+ };
+ 
++// Register-visible envelope before the first mixer update after key-on.
++struct EarlyEnvelope {
++    Envelope value;
++    Phase phase = kOff;
++    std::uint64_t cycle = 0;
++    bool active = false;
++};
++
+ struct Transfer {
+     std::uint32_t madr = 0, bytes = 0;
+     int channel = -1;
+@@ -74,6 +82,7 @@
+ 
+ struct Core {
+     Voice voices[24];
++    EarlyEnvelope early[24];
+     std::uint16_t attr = 0, admas = 0;
+     std::uint32_t irqa = 0x800u, tsa = 0;
+     std::uint16_t mvol[2] = {0x3FFF, 0x3FFF}, bvol[2] = {0x7FFF, 0x7FFF}, avol[2] = {0x7FFF, 0x7FFF}, evol[2] = {};
+@@ -206,23 +215,22 @@
+     check_irq(v.block[0], 8);
+ }
+ 
+-void update_envelope(Voice &v) {
+-    Envelope &e = v.env;
+-    switch (v.phase) {
++void update_envelope(Envelope &e, Phase &phase, std::uint16_t adsr1, std::uint16_t adsr2) {
++    switch (phase) {
+     case kAttack:
+-        e.step((v.adsr1 >> 8) & 0x7F, false, v.adsr1 & 0x8000u);
+-        if (e.level >= 0x7FFF) v.phase = kDecay;
++        e.step((adsr1 >> 8) & 0x7F, false, adsr1 & 0x8000u);
++        if (e.level >= 0x7FFF) phase = kDecay;
+         break;
+     case kDecay:
+-        e.step(((v.adsr1 >> 4) & 0xF) << 2, true, true);
+-        if (e.level <= ((v.adsr1 & 0xF) + 1) * 0x800) v.phase = kSustain;
++        e.step(((adsr1 >> 4) & 0xF) << 2, true, true);
++        if (e.level <= ((adsr1 & 0xF) + 1) * 0x800) phase = kSustain;
+         break;
+     case kSustain:
+-        e.step((v.adsr2 >> 6) & 0x7F, v.adsr2 & 0x4000u, v.adsr2 & 0x8000u);
++        e.step((adsr2 >> 6) & 0x7F, adsr2 & 0x4000u, adsr2 & 0x8000u);
+         break;
+     case kRelease:
+-        e.step((v.adsr2 & 0x1F) << 2, true, v.adsr2 & 0x20u);
+-        if (e.level <= 0) v.phase = kOff;
++        e.step((adsr2 & 0x1F) << 2, true, adsr2 & 0x20u);
++        if (e.level <= 0) phase = kOff;
+         break;
+     default:
+         break;
+@@ -290,7 +298,7 @@
+             check_irq(v.block[0], 8);
+             decode_block(v, v.buffer + 28);
+         }
+-        update_envelope(v);
++        update_envelope(v.env, v.phase, v.adsr1, v.adsr2);
+         const std::int32_t out = sample * v.env.level >> 15;
+         if (raw) raw[n] = clamp16(out);
+         // the volume sweeps step once per sample whatever the voice is sent to
+@@ -460,6 +468,7 @@
+     static const bool count = std::getenv("PS2_SPU2_COUNT") != nullptr;
+     static std::uint64_t ticks = 0, active = 0, phases[5] = {};
+     for (int c = 0; c < 2; ++c) {
++        for (auto &early : g_cores[c].early) early.active = false;
+         const Routing route = routing(g_cores[c]);
+         for (int i = 0; i < 24; ++i) {
+             Voice &v = g_cores[c].voices[i];
+@@ -527,6 +536,17 @@
+ std::uint32_t set_hi(std::uint32_t address, std::uint32_t v) { return ((v & 0xFu) << 16) | (address & 0xFFFFu); }
+ std::uint32_t set_lo(std::uint32_t address, std::uint32_t v) { return (address & 0xF0000u) | (v & 0xFFFFu); }
+ 
++void advance_early_envelope(EarlyEnvelope &early, const Voice &voice) {
++    if (!early.active) return;
++    // The next scheduled mixer tick takes over. The bound also limits a malformed checkpoint.
++    const std::uint64_t until = std::min(kernel::now(), g_next_tick);
++    if (until < early.cycle) return;
++    const std::uint64_t samples = std::min<std::uint64_t>((until - early.cycle) / kCyclesPerSample, kBatch);
++    for (std::uint64_t n = 0; n < samples; ++n)
++        update_envelope(early.value, early.phase, voice.adsr1, voice.adsr2);
++    early.cycle += samples * kCyclesPerSample;
++}
++
+ std::uint32_t read_voice(Core &k, std::uint32_t off) {
+     if (off < 0x180u) {
+         const Voice &v = k.voices[off >> 4];
+@@ -536,7 +556,11 @@
+         case 0x4: return v.pitch;
+         case 0x6: return v.adsr1;
+         case 0x8: return v.adsr2;
+-        case 0xA: return static_cast<std::uint32_t>(v.env.level);
++        case 0xA: {
++            EarlyEnvelope &early = k.early[off >> 4];
++            advance_early_envelope(early, v);
++            return static_cast<std::uint32_t>(early.active ? early.value.level : v.env.level);
++        }
+         case 0xC: return static_cast<std::uint32_t>(v.vol[0].level);
+         default: return static_cast<std::uint32_t>(v.vol[1].level);
+         }
+@@ -575,9 +599,21 @@
+             if (!(value & 0x8000u)) v.vol[1].level = static_cast<std::int16_t>(value << 1);
+             break;
+         case 0x4: v.pitch = static_cast<std::uint16_t>(value); break;
+-        case 0x6: v.adsr1 = static_cast<std::uint16_t>(value); break;
+-        case 0x8: v.adsr2 = static_cast<std::uint16_t>(value); break;
+-        case 0xA: v.env.level = static_cast<std::int16_t>(value); break;
++        case 0x6:
++            advance_early_envelope(k.early[off >> 4], v);
++            v.adsr1 = static_cast<std::uint16_t>(value);
++            break;
++        case 0x8:
++            advance_early_envelope(k.early[off >> 4], v);
++            v.adsr2 = static_cast<std::uint16_t>(value);
++            break;
++        case 0xA: {
++            EarlyEnvelope &early = k.early[off >> 4];
++            advance_early_envelope(early, v);
++            v.env.level = static_cast<std::int16_t>(value);
++            if (early.active) early.value.level = v.env.level;
++            break;
++        }
+         default: break;
+         }
+         return;
+@@ -618,9 +654,17 @@
+                          on ? "on" : "off", v.key_on ? 1 : 0, static_cast<int>(v.phase), v.env.level, v.end ? 1 : 0, v.ssa);
+         if (on) {
+             v.key_on = true;
+-            if (!kon_late()) key_on(v);
++            if (!kon_late()) {
++                key_on(v);
++                k.early[i] = EarlyEnvelope{v.env, v.phase, kernel::now(), true};
++            }
+         } else if (v.key_on) v.key_on = false;
+-        else if (v.phase != kOff) v.phase = kRelease;
++        else if (v.phase != kOff) {
++            EarlyEnvelope &early = k.early[i];
++            advance_early_envelope(early, v);
++            if (early.active && early.phase != kOff) early.phase = kRelease;
++            v.phase = kRelease;
++        }
+     }
+ }
+ 
+@@ -756,7 +800,11 @@
+     if (!out.empty() && out != chip && !g_sink && g_out_wav.open(out)) std::fprintf(stderr, "[spu2] writing the sound to %s (no sound device)\n", out.c_str());
+ }
+ 
+-void restart_ticks() { g_tick_pending = false; }
++void restart_ticks() {
++    g_tick_pending = false;
++    for (Core &core : g_cores)
++        for (auto &early : core.early) early.active = false;
++}
+ 
+ std::uint16_t *ram() { return g_ram.data(); }
+ 
+@@ -885,6 +933,17 @@
+             s.pod(t.channel);
+         });
+         s.pod(k.regs);
++        if (s.version() >= 10) {
++            for (auto &early : k.early) {
++                s.pod(early.value.counter);
++                s.pod(early.value.level);
++                s.pod(early.phase);
++                s.pod(early.cycle);
++                s.pod(early.active);
++            }
++        } else {
++            for (auto &early : k.early) early = {};
++        }
+     }
+     s.pod(g_spdif_out);
+     s.pod(g_spdif_mode);
+--- a/runtime/src/system.cpp
++++ b/runtime/src/system.cpp
+@@ -493,7 +493,7 @@
+ namespace {
+ 
+ constexpr char kStateMagic[8] = {'P', 'S', '2', 'S', 'T', 'A', 'T', 'E'};
+-constexpr std::uint32_t kStateVersion = 9;
++constexpr std::uint32_t kStateVersion = 10;
+ 
+ std::function<void()> event_action(int id, std::uint64_t at) {
+     if (id == hw::kEventVblank) return vblank;
+@@ -523,7 +523,8 @@
+     // 7 adds the SIF RPC endpoints kept per server (guest servers, their order) and the IOP-to-EE request packet ring (SIF RPC rework, PR #27);
+     // 8 adds the IOP's low-level hardware timers (AllocHardTimer, SetTimerCompare, SetTimerMode) that raise an interrupt;
+     // 9 adds the count of GS FINISH events that wait until the game has cleared CSR.FINISH.
+-    if (version != kStateVersion && !(s.loading() && (version >= 4 && version <= 8))) throw std::runtime_error("state file from another version");
++    // 10 stores the SPU2 envelope visible to register reads before the first mixer update after key-on.
++    if (version < 4 || version > kStateVersion) throw std::runtime_error("state file from another version");
+     s.set_version(version);
+     s.tag("ee");
+     s.pod(g_cpu);
+--- /dev/null
++++ b/tests/spu2_envx_state.cpp
+@@ -0,0 +1,106 @@
++#include "iop/iop.hpp"
++#include "iop/spu2.hpp"
++#include "ps2/state.hpp"
++
++#include <cstdint>
++#include <cstdio>
++
++namespace {
++namespace iop = ps2::iop;
++namespace spu = ps2::iop::spu2;
++
++constexpr std::uint32_t kAdsr1 = 0x006;
++constexpr std::uint32_t kAdsr2 = 0x008;
++constexpr std::uint32_t kEnvx = 0x00A;
++constexpr std::uint32_t kKeyOn = 0x1A0;
++constexpr std::uint32_t kKeyOff = 0x1A4;
++constexpr std::uint32_t kFastAttack = 0x000F;
++constexpr std::uint32_t kSlowAttack = 0x7F0F;
++constexpr std::uint64_t kEeCyclesPerSample = iop::kClockDivider * 768;
++int checks = 0;
++int failures = 0;
++
++void expect(std::uint32_t actual, std::uint32_t expected, const char *message) {
++    ++checks;
++    if (actual == expected) return;
++    ++failures;
++    std::fprintf(stderr, "FAIL: %s (got 0x%X, expected 0x%X)\n", message, actual, expected);
++}
++
++void write(std::uint32_t address, std::uint32_t value) { spu::write(address, value, 2); }
++std::uint32_t read() { return spu::read(kEnvx, 2); }
++
++ps2::state::Writer save_iop(std::uint32_t version) {
++    ps2::state::Writer state;
++    state.set_version(version);
++    iop::state(state);
++    return state;
++}
++
++void restore_iop(const ps2::state::Writer &saved) {
++    ps2::state::Reader state(saved.out.data(), saved.out.size());
++    state.set_version(saved.version());
++    iop::state(state);
++}
++
++void start_voice() {
++    iop::reset();
++    write(kAdsr1, kFastAttack);
++    write(kAdsr2, 0x1FC0);
++    write(kKeyOn, 1);
++}
++}
++
++int main() {
++    start_voice();
++    expect(read(), 0, "key-on begins with a zero envelope");
++    iop::run(kEeCyclesPerSample + kEeCyclesPerSample / 2);
++    const auto pending = save_iop(10);
++    iop::run(kEeCyclesPerSample / 2);
++    expect(read(), 0x7000, "two elapsed samples advance fast attack twice");
++    restore_iop(pending);
++    expect(read(), 0x3800, "restore before the first ENVX read retains the first sample");
++    iop::run(kEeCyclesPerSample / 2);
++    expect(read(), 0x7000, "restore retains the sub-sample remainder");
++
++    start_voice();
++    iop::run(kEeCyclesPerSample);
++    write(kAdsr1, kSlowAttack);
++    expect(read(), 0x3800, "an ADSR write preserves elapsed attack at the previous rate");
++    const auto changed = save_iop(10);
++    iop::run(3 * kEeCyclesPerSample);
++    expect(read(), 0x3800, "the new slow attack rate applies to subsequent samples");
++    restore_iop(changed);
++    iop::run(3 * kEeCyclesPerSample);
++    expect(read(), 0x3800, "a checkpoint retains the result of the mid-batch write");
++    write(kKeyOff, 1);
++    iop::run(kEeCyclesPerSample);
++    expect(read(), 0, "key-off releases the projected envelope");
++    restore_iop(changed);
++    write(kEnvx, 0x1234);
++    expect(read(), 0x1234, "an ENVX write updates the value visible before mixing");
++
++    start_voice();
++    iop::run(kEeCyclesPerSample);
++    expect(read(), 0x3800, "legacy fixture begins with an active projection");
++    const auto legacy = save_iop(9);
++    restore_iop(legacy);
++    expect(read(), 0, "legacy checkpoint loads without transient data");
++    iop::run(33 * kEeCyclesPerSample);
++    expect(read() != 0, 1, "the regular mixer still advances a voice restored by a legacy checkpoint");
++
++    start_voice();
++    constexpr std::uint32_t kSecondCore = 0x400;
++    constexpr std::uint32_t kVoice17 = 0x110;
++    write(kSecondCore + kVoice17 + kAdsr1, kFastAttack);
++    write(kSecondCore + kKeyOn + 2, 2);
++    iop::run(kEeCyclesPerSample);
++    expect(spu::read(kSecondCore + kVoice17 + kEnvx, 2), 0x3800, "core 1 high voice bit selects voice 17");
++    write(kSecondCore + kVoice17 + kAdsr1, kSlowAttack);
++    iop::run(kEeCyclesPerSample);
++    expect(read(), 0x7000, "a configuration write in core 1 leaves core 0's envelope independent");
++    expect(spu::read(kSecondCore + kVoice17 + kEnvx, 2), 0x3800, "only the selected voice uses the new rate");
++
++    std::printf("%d SPU2 checks, %d failed\n", checks, failures);
++    return failures != 0;
++}
