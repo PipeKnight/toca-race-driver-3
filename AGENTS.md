@@ -6,6 +6,10 @@ These rules apply throughout the repository. The launch, packaging, and verifica
 
 Write and maintain all project documentation in English, including plans, research notes, build instructions, and release notes. Use English for code comments and docstrings.
 
+## Commit identity
+
+Use `PipeKnight <34810566+PipeKnight@users.noreply.github.com>` as the author and committer for automated commits made on behalf of this repository's owner.
+
 ## Six recommendations from the open letter
 
 1. **One entry point.** Ship one user-facing executable per platform and architecture. Have it handle first-run setup when needed and launch the game directly once setup is complete. Players and third-party launchers use the same executable. Internal helper processes and separate developer builds are permitted.
