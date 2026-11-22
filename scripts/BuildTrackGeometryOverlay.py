@@ -40,8 +40,10 @@ def vertex_bounds(source, node, payload_bytes, base):
     tag, address = RELOCATION.unpack_from(source, node)
     offset = address - base
     end = offset + (tag & 0xFFFF) * 16
-    if (tag >> 28) & 7 != 3 or not 0 <= offset < end <= payload_bytes:
+    if (tag >> 28) & 7 != 3 or not 0 <= offset <= end <= payload_bytes:
         raise ValueError("Invalid scene leaf DMA packet")
+    if offset == end:
+        return None  # A zero-length REF has no vertices to include in its parent's bounds.
     read_cycle = write_cycle = 1
     low = [math.inf] * 3
     high = [-math.inf] * 3
@@ -144,10 +146,13 @@ def convert_scene(source):
             if address in visiting:
                 raise ValueError("Cycle in donor scene tree")
             visiting.add(address)
-            boxes = tuple(bounds_of(child) for child in children_by_node[address])
-            low = tuple(min(box[axis] for box in boxes) for axis in range(3))
-            high = tuple(max(box[axis] for box in boxes) for axis in range(3, 6))
-            bounds_by_node[address] = low + high
+            boxes = tuple(box for child in children_by_node[address] if (box := bounds_of(child)) is not None)
+            if boxes:
+                low = tuple(min(box[axis] for box in boxes) for axis in range(3))
+                high = tuple(max(box[axis] for box in boxes) for axis in range(3, 6))
+                bounds_by_node[address] = low + high
+            else:
+                bounds_by_node[address] = None
             visiting.remove(address)
         return bounds_by_node[address]
 
@@ -160,8 +165,9 @@ def convert_scene(source):
         node[:0x18] = source[old_start:old_start + 0x18]
         node[0x40:0x68] = source[old_start + 0x18:old_start + 0x40]
         bounds = bounds_of(address)
-        VERTEX.pack_into(node, 0x20, *bounds[:3])
-        VERTEX.pack_into(node, 0x30, *bounds[3:])
+        if bounds is not None:
+            VERTEX.pack_into(node, 0x20, *bounds[:3])
+            VERTEX.pack_into(node, 0x30, *bounds[3:])
         for relative in range(0, 0x40, 4):
             kind = relocations.get(old_start + relative)
             if kind is None:
