@@ -2,6 +2,8 @@
 
 The launcher packages the first-run setup for Windows 11 x64. Supply your own North American PS2 disc, `SLUS-21182` v1.02, as an ISO, a matching DVD CHD, or a directory of extracted disc files. Keep the disc available at launch. The launcher builds the runner locally and reads the original disc in place. The package includes the launcher, setup scripts, patches, and pinned upstream source archives.
 
+The first limited public preview was published on November 22, 2026. Clean installation was verified in Windows Sandbox with software graphics. Full races on Direct3D 12 used recorded inputs on an existing Windows installation. [Windows x64 preview download](https://github.com/PipeKnight/toca-race-driver-3/releases/tag/v0.1.0-preview.1)
+
 ## Build the package
 
 From the project directory, run this in PowerShell on Windows.
@@ -44,6 +46,12 @@ Use a clean Windows 11 x64 installation with a working graphics driver, a physic
 3. Exit normally, then start the same package with `--direct --fullscreen`. Load the profile and check the race result or next round. Switch to windowed mode and exit normally again. Record the card SHA-256 after the race and after reloading. Save the runtime logs and results screen locally with the report.
 
 For input diagnostics, set `PS2_PAD_LOG=1` in the PowerShell session before launching. Keep the memory card and logs private when reporting a result. The report can include the hashes, device models, and relevant log lines without sharing the ISO or card image.
+
+### Check a physical controller on an existing Windows installation
+
+Connect the controller before launching. Use a fresh data directory to test profile creation and autosave independently of your regular profile. A prepared setup can be reused through `--setup-dir`. Start in windowed mode and confirm the controller moves the menu selection, accepts a choice, and controls steering, throttle, and brake in a race. On the default Xbox mapping, A is Cross, X is Square, and the left stick steers. Check the in-game controls if you changed the driving bindings.
+
+Finish an event, wait for autosave, and close the game. Use `--direct --fullscreen` with the same data and setup directories to confirm that the profile and progress load. The data directory contains `logs/ps2run_*.log`. With `PS2_PAD_LOG=1`, the log records the controller name and input transitions for the guest ports. This run provides physical input and driver coverage on the existing installation. The clean desktop release test uses the full combination in a fresh installation.
 
 ## Verification
 

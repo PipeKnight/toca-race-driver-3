@@ -10,6 +10,10 @@ Write and maintain all project documentation in English, including plans, resear
 
 Use `PipeKnight <34810566+PipeKnight@users.noreply.github.com>` as the author and committer for automated commits made on behalf of this repository's owner.
 
+## Windows release downloads
+
+Ship future Windows releases as a single portable `.exe` with its setup files bundled. Players should be able to launch it directly without extracting a ZIP or installing it system-wide. Preserve the existing portable data and setup directory options.
+
 ## Six recommendations from the open letter
 
 1. **One entry point.** Ship one user-facing executable per platform and architecture. Have it handle first-run setup when needed and launch the game directly once setup is complete. Players and third-party launchers use the same executable. Internal helper processes and separate developer builds are permitted.

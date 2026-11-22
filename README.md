@@ -4,7 +4,7 @@ An experimental project to run the original PlayStation 2 release of TOCA Race D
 
 The current test target is the North American PS2 release, `SLUS-21182` v1.02. The Windows 11 build has reached races, saved championship results, and restored progress after restarting. Full-game acceptance and additional platforms remain in progress.
 
-- [Windows preview launcher and first-run setup](docs/windows-preview.md)
+- [Download the Windows 11 x64 preview](https://github.com/PipeKnight/toca-race-driver-3/releases/tag/v0.1.0-preview.1) and follow the [first-run instructions](docs/windows-preview.md)
 - [Developer build and verification](docs/native-recompilation.md)
 - [Linux developer build](docs/linux-development.md)
 - [Supported disc and archive research](docs/ps2-disc-and-archives.md)
