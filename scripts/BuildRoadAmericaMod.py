@@ -23,6 +23,11 @@ TRACK_CATALOG_SECTOR = 80673
 TRACK_CATALOG_BYTES = 0x4800
 EVENT_CATALOG_SECTOR = 81008
 EVENT_CATALOG_BYTES = 0x1FE800
+RAIN_TRACK_SECTOR = 510880
+RAIN_TRACK_BYTES = 1363456
+RAIN_DMA_SECTOR = 513312
+RAIN_DMA_BYTES = 3568768
+ROAD_AMERICA_RAIN_DONOR_SECTOR = 976987
 
 
 @dataclass(frozen=True)
@@ -270,7 +275,7 @@ def track_package(original, collision, route):
             stored = original[offset:offset + length]
             nested = unpack_lzss(stored, expanded) if flags & 1 else stored
             rebuilt = repack_jpak(nested, 163, {b"osc1.ail": route})
-            return repack_jpak(original, 44, {b"col.col": collision, b"osc1.big": rebuilt}, TRACK_BYTES)
+            return repack_jpak(original, 44, {b"col.col": collision, b"osc1.big": rebuilt}, len(original))
     raise ValueError("Missing nested reference track route")
 
 
@@ -301,12 +306,22 @@ def main():
                 folder.mkdir(exist_ok=True)
                 collision = read_donor_member(donor, course.scene_package, b"col.col")
                 route = read_donor_member(donor, course.route_package, f"{course.donor_prefix}.aid".encode("ascii"))
-                track = track_package(original_track, collision, convert_route(route, course.route_counts))
+                route = convert_route(route, course.route_counts)
+                track = track_package(original_track, collision, route)
                 scene_sector, scene_entries, _ = course.scene_package
                 geometry, _ = make_overlay(original_dma, donor, donor_sector=scene_sector, donor_prefix=course.donor_prefix,
                                            donor_members_count=scene_entries)
                 (folder / "TRACK.JPK").write_bytes(track)
                 (folder / "DMA1.JPK").write_bytes(geometry)
+                if course == ROAD_AMERICA:
+                    rain = output / "rain"
+                    rain.mkdir()
+                    rain_track = read_exact(reference, RAIN_TRACK_SECTOR * SECTOR_SIZE, RAIN_TRACK_BYTES)
+                    rain_dma = read_exact(reference, RAIN_DMA_SECTOR * SECTOR_SIZE, RAIN_DMA_BYTES)
+                    rain_geometry, _ = make_overlay(rain_dma, donor, donor_sector=ROAD_AMERICA_RAIN_DONOR_SECTOR,
+                                                   donor_members_count=scene_entries, reference_members=("sky.dma",))
+                    (rain / "TRACK.JPK").write_bytes(track_package(rain_track, collision, route))
+                    (rain / "DMA1.JPK").write_bytes(rain_geometry)
             output.rename(args.output)
     except (OSError, ValueError, IndexError, KeyError, StopIteration, struct.error) as error:
         parser.exit(1, f"Road America setup failed: {error}\n")

@@ -59,6 +59,12 @@ Finish an event, wait for autosave, and close the game. Use `--direct --fullscre
 
 ## Verification
 
+### Windows preview 5 release
+
+The release executable SHA-256 is `bd261ecffd77068d6c15f9a78b4d2b753c5392556adab4612d8a22b816a721f2`. The exact executable built a fresh backend from the reference ISO and verified dependency archives in an offline Windows 11 Sandbox. The software-rendered first launch reached frame 780. A separate direct launch reached frame 540 with the same runner hash.
+
+A previous Sprintcar profile and settings reopened through frame 3120 with 341 card page reads and zero writes. The card, settings, and runner hashes were unchanged. The expanded circuit pack and the DTM overlay started together, selected `road-america-dtm.ps2`, and reached frame 150. The guest evidence is in `local/release-preview-5/sandbox-evidence/`. See also the [Road America Rain tests](ps2-disc-and-archives.md#road-america-in-rain) and the [combined lap record test](ps2-disc-and-archives.md#local-lap-records) on the Windows host.
+
 ### Windows preview 4 release
 
 The release executable SHA-256 is `84314c5f217af742f5ca95785f9ec9e8a5df5a57758c3b2c2e9362faec5baa2e`. In an offline Windows 11 Sandbox on build `26100.9606`, it prepared a fresh backend from the reference ISO and verified dependency archives. The software-rendered first launch reached frame 780, and a separate direct launch reached frame 540 with the same runner hash.

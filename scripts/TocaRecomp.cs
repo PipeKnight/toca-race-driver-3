@@ -10,7 +10,7 @@ using System.Text;
 
 internal static class TocaRecomp
 {
-    private const string Version = "0.1.0-preview.4";
+    private const string Version = "0.1.0-preview.5";
     private const string SupportPrefix = "support/";
 
     private const string Usage =
@@ -21,7 +21,7 @@ internal static class TocaRecomp
         "--disc PATH          ISO, DVD CHD, or folder containing the extracted disc files.\n" +
         "--data-dir PATH      Saves, settings, caches, and runtime logs. Defaults to the launcher folder.\n" +
         "--setup-dir PATH     Portable toolchain and build files. Defaults to setup under the data folder.\n" +
-        "--road-america PATH  Enable the locally built Road America add-on and use its own memory card.\n" +
+        "--road-america PATH  Enable a locally built circuit pack and use its separate memory card.\n" +
         "--dtm-mod PATH       Load local DTM car overlays and use a separate memory card.\n" +
         "--windowed          Open a window (default).\n" +
         "--fullscreen        Open fullscreen.\n" +

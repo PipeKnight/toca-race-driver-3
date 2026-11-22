@@ -270,9 +270,9 @@ Choose a new folder under an existing parent for the output. The builder reads b
 .\TocaRecomp.exe --disc 'D:\Discs\TOCA Race Driver 3.iso' --road-america 'D:\Mods\Road America'
 ```
 
-In **Free Race**, select **Autosport Clio Cup** and then **Road America**. Use **Sunny** for the experimental track. The add-on uses its own `road-america.ps2` under the launcher's data directory. Start the launcher without `--road-america` to use `toca-slus-21182.ps2` for the stock game. The imported track has its own catalog entry, `tqa1`, and uses record index 19, which is free among the 80 stock entries. Oschersleben is also selectable in the add-on's Clio Cup calendar.
+In **Free Race**, select **Autosport Clio Cup** and then **Road America**, in **Sunny** or **Rain** conditions. The add-on uses its own `road-america.ps2` under the launcher's data directory. Start the launcher without `--road-america` to use `toca-slus-21182.ps2` for the stock game. The imported track has its own catalog entry, `tqa1`, and uses record index 19, which is free among the 80 stock entries. Oschersleben is also selectable in the add-on's Clio Cup calendar.
 
-The import has a 6.057 km lap, converted collision and AI route data, and the rebuilt donor scene. Some companion resources still come from Oschersleben. Additional weather and the Hall of Fame table need separate verification.
+The import has a 6.057 km lap, converted collision and AI route data, and the rebuilt donor scene. Some companion resources still come from Oschersleben. The [local lap record](#local-lap-records) is stored under Road America's imported track ID.
 
 The Windows 11 x64 candidate prepared a fresh backend from the portable executable and the original ISO. Two cold runs of that backend used the RTX 4070 through Direct3D 12. The first selected Road America, loaded both donor overlays, and drove off the grid. The second selected Oschersleben with the add-on still active, used the stock packages, and reached the original grid. Both courses also appeared under their own names in the track carousel. Separate `--direct` runs through `TocaRecomp.exe` selected `road-america.ps2` with the flag and `toca-slus-21182.ps2` without it. The stock test card's SHA-256 stayed unchanged. Local evidence is under `local/road-america-launch/`.
 
@@ -280,9 +280,17 @@ A third Direct3D 12 run started from power-on with recorded input, selected Road
 
 In **Time Trial**, the Autosport Clio Cup recorded a best lap of **2:47.56** on Road America. The portable backend replayed the full drive from power-on and matched all 1,513 checkpoints through the pause menu. Ending the Time Trial session triggered the autosave. On a cold launch, **Load** displayed Player One's 2:47.56 record for **Road America** in the Racing Clio alongside the original Dirt Raceway 1 ghost. The card passed filesystem and ECC checks. The cold run read 357 pages, wrote zero, and preserved the card hash. The evidence includes `time-trial-save/frames/frame_18800.png`, `time-trial-end-session/frames/frame_23720.png`, and `time-trial-cold/frames/frame_05625.png`.
 
+### Road America in Rain
+
+Windows preview 5 recognizes the optional `rain` folder in the circuit pack. The builder places the rainy `TRACK.JPK` and `DMA1.JPK` there. It keeps Road America's collision and route, rebuilds the scene from the second donor archive entry, and preserves the reference PS2 rain sky. The reference Rain slots are at `RDH_1.HUG` sectors 510880 and 513312. The converted files fit the respective `1,363,456` and `3,568,768` byte spans.
+
+Rebuild the pack in a new directory using the same two disc directories and point `--road-america` at it. Your add-on memory card follows the data directory. Older packs with their four original files still load. Their Rain selection runs the imported Sunny scene with the game's rain effects. A pack that supplies a `rain` directory needs both files in that directory.
+
+The original preview 4 replay selected Road America Rain and reached the Oschersleben starting straight. On the current backend, a Direct3D 12 replay with the rebuilt pack loaded both dedicated Rain packages and rendered the Road America straight under overcast skies. A four-file pack reached the same course with its existing scene and rain effects. Stock Oschersleben still loaded its original Rain packages while the expanded pack was active. A pack with only one Rain file was rejected before guest startup. The local runs are under `local/a1-ring-pack/` in `gp-road-rain-original/`, `gp-road-rain-final-grid/`, `gp-four-file-rain-regression/`, and `gp-stock-rain-fixed/`.
+
 ### Add A1-Ring GP and Short
 
-Build the Windows executable from a checkout with the A1-Ring patch and use the same two discs as for Road America. Create the expanded pack in a new directory. The four files produced without `--include-a1-ring` retain the original add-on format.
+Use the Windows executable with the A1-Ring patch and the same two discs as for Road America. Create the expanded pack in a new directory. The four files at the root retain the original add-on format.
 
 ```powershell
 python scripts/BuildRoadAmericaMod.py 'D:\Discs\RD3' 'F:\' 'D:\Mods\RD2 Circuits' --include-a1-ring
@@ -293,7 +301,7 @@ Select **Free Race → Autosport Clio Cup**, then choose **A1-Ring GP** or **A1-
 
 | Track | RD2 package | RD3 slot | Record index | Resource folder |
 | --- | --- | --- | ---: | --- |
-| Road America | `roa` | `tqa1` | 19 | Pack root |
+| Road America | `roa` | `tqa1` | 19 | Pack root and `rain` |
 | A1-Ring GP | `a11` | `tqa2` | 34 | `tqa2` |
 | A1-Ring Short | `a12` | `tqa3` | 35 | `tqa3` |
 
@@ -304,3 +312,11 @@ Recorded controller inputs drove both Sunny Clio Cup races from power-on to the 
 The release backend replayed the driving inputs from the grid with no checkpoint differences (688 on GP and 388 on Short). Continuing after the finish autosaved each race. The game wrote 772 memory-card pages in each test. Race Results classified Player One 16th of 20 in **2:18.43** on GP and **1:17.73** on Short. Both cards passed the filesystem and ECC checks. Separate cold launches displayed **Load Successful** with 341 page reads and zero writes per card and preserved both hashes. Find the results, autosave, and reload captures under `gp-results/`, `short-results/`, `gp-reload/`, and `short-reload/`.
 
 In **Time Trial**, the Racing Clio completed a **2:14.52** lap on GP and a **1:13.20** lap on Short. Each independent test ended the session and autosaved. The release backend matched 590 GP and 341 Short driving checkpoints through the controller replays. After a cold launch with each saved card, **Load** showed the correct A1-Ring layout and time alongside the original Dirt Raceway 1 ghost. Each cold run read 357 pages, wrote zero, and kept the card hash. Both cards also passed the filesystem and ECC checks. See `gp-trial-cold/frames/frame_05905.png` and `short-trial-cold/frames/frame_05905.png` under the local evidence directory.
+
+### Local lap records
+
+The profile on the reference PS2 disc has a `LapRecords` section independent of the ghost file. The save registration at `0x0018d958` associates the section with a reader at `0x0014e628`. The reader accepts a `0xbcac`-byte block and loads it at `0x0054bb78`. On the test profiles the block begins at byte `0x14320` of the profile payload. Each 28-byte record contains the track ID at offset 0, the class code at offset 4, and the floating-point lap time in seconds at offset 20. The Autosport Clio Cup uses `RCL`.
+
+Independent Time Trial saves contained `tqa1` at 167.5606 seconds, `tqa2` at 134.5213 seconds, and `tqa3` at 73.2053 seconds. A controlled A1-Ring GP replay changed only `HOFIndex` from 34 to unused index 36 in `tracks.big`. Both cold runs reached the result and autosave with identical finalized memory cards. This test shows that the local lap record uses the track ID in this mode. The numeric indices are still unique for compatibility with any consumers of that field.
+
+Starting with the Road America card, the next two Time Trial sessions added the GP and Short records to the same profile. A cold launch restored all 48,300 bytes of the resulting `LapRecords` block in guest memory with the three entries intact. The card hash stayed unchanged. The test cards and traces are in `local/a1-ring-pack/gp-combined-lap-records/`, `short-combined-lap-records/`, and `short-combined-records-reload/`.

@@ -205,7 +205,8 @@ def convert_scene(source):
             + FOOTER.pack(count + len(added), len(payload), base)), len(nodes)
 
 
-def make_overlay(original, donor_archive, *, donor_sector=DONOR_SECTOR, donor_prefix="roa", donor_members_count=47):
+def make_overlay(original, donor_archive, *, donor_sector=DONOR_SECTOR, donor_prefix="roa",
+                 donor_members_count=47, reference_members=()):
     magic, _, count = struct.unpack_from("<4sII", original)
     if magic != b"JPAK" or count != 14:
         raise ValueError("Unexpected reference DMA1.JPK directory")
@@ -228,23 +229,29 @@ def make_overlay(original, donor_archive, *, donor_sector=DONOR_SECTOR, donor_pr
     output = bytearray(original[:data_start])
     nodes = 0
     for index, fields in enumerate(entries):
-        name_offset, _, _, _, _, _, flags, _ = fields
+        name_offset, stored, offset, expanded, _, _, flags, _ = fields
         if not index_end <= name_offset < data_start or not flags & 1:
             raise ValueError("Unexpected reference DMA1.JPK member")
         member = original[name_offset:data_start].split(b"\0", 1)[0].decode("ascii")
-        stem = Path(member).stem
-        donor_name = f"{donor_prefix}_{names.get(stem, stem)}.dma"
-        if donor_name not in donor_members:
-            raise ValueError(f"Donor geometry member {donor_name!r} is missing")
-        length, relative = donor_members[donor_name]
-        if not 0 < length <= available - relative:
-            raise ValueError(f"Donor geometry member {donor_name!r} exceeds the archive")
-        source = read_exact(donor_archive, start + data_base + relative, length)
-        converted, converted_count = convert_scene(source)
-        nodes += converted_count
-        packed = encode_lzss(converted)
+        if member in reference_members:
+            if not data_start <= offset <= len(original) - stored:
+                raise ValueError(f"Invalid reference geometry member {member!r}")
+            packed = original[offset:offset + stored]
+        else:
+            stem = Path(member).stem
+            donor_name = f"{donor_prefix}_{names.get(stem, stem)}.dma"
+            if donor_name not in donor_members:
+                raise ValueError(f"Donor geometry member {donor_name!r} is missing")
+            length, relative = donor_members[donor_name]
+            if not 0 < length <= available - relative:
+                raise ValueError(f"Donor geometry member {donor_name!r} exceeds the archive")
+            source = read_exact(donor_archive, start + data_base + relative, length)
+            converted, converted_count = convert_scene(source)
+            nodes += converted_count
+            expanded = len(converted)
+            packed = encode_lzss(converted)
         output.extend(bytes(-len(output) % 64))
-        struct.pack_into("<III", output, 36 + index * JPAK_ENTRY.size, len(packed), len(output), len(converted))
+        struct.pack_into("<III", output, 36 + index * JPAK_ENTRY.size, len(packed), len(output), expanded)
         output.extend(packed)
     if len(output) > len(original):
         raise ValueError("Converted geometry exceeds the reference DMA1.JPK archive extent")

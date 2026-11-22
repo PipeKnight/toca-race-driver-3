@@ -71,7 +71,9 @@ python scripts/ModAssets.py replace --file "$addon\TRACK.JPK" col.col "$work\roa
 
 On Windows 11 Direct3D 12 the experimental course reached frame 8350 from power-on. The guest collision data contained surface type `2` for triangle 1134 where the control package had `0`. The vertex stream matched the control. A separate race opened a repacked `TRACK.JPK` containing an edited `lights.ini`. The captured light resource matched the original copy in the stock companion package. Confirm which resource the loader uses before attributing a visual effect to an archive edit.
 
-The importer can build a [three-course pack](ps2-disc-and-archives.md#add-a1-ring-gp-and-short) with Road America, A1-Ring GP, and A1-Ring Short in separate slots. To edit an A1-Ring member, copy the entire expanded pack and edit the files under `tqa2` or `tqa3`. Keep the two catalogs and all three resource pairs in the candidate. Both A1-Ring layouts have passed Free Race and Time Trial with autosave. Hall of Fame verification and a workflow for newly authored geometry remain in the [checklist](acceptance-checklist.md#separate-modding-milestone).
+The importer can build a [three-course pack](ps2-disc-and-archives.md#add-a1-ring-gp-and-short) with Road America, A1-Ring GP, and A1-Ring Short in separate slots. To edit an A1-Ring member, copy the entire expanded pack and edit the files under `tqa2` or `tqa3`. Keep the two catalogs and all three resource pairs in the candidate. Both A1-Ring layouts have passed Free Race and Time Trial with autosave. The [local lap records](ps2-disc-and-archives.md#local-lap-records) for all three imports coexist in one profile.
+
+For a Road America edit that applies in both weather settings, edit the corresponding package member at the root and under `rain`. The root files supply Sunny, and the extra pair supplies Rain. Use a separate pack directory for the experiment. [Road America in Rain](ps2-disc-and-archives.md#road-america-in-rain)
 
 ## Cars
 

@@ -1,11 +1,11 @@
 # TOCA Race Driver 3 Recompilation for Windows 11 x64
 
-Version `0.1.0-preview.4` is a development preview for the North American PS2 disc `SLUS-21182` v1.02. Use a disc image from your own copy. The launcher compiles the original executable locally and reads the original disc at runtime. A PS2 BIOS and PCSX2 are unnecessary.
+Version `0.1.0-preview.5` is a development preview for the North American PS2 disc `SLUS-21182` v1.02. Use a disc image from your own copy. The launcher compiles the original executable locally and reads the original disc at runtime. A PS2 BIOS and PCSX2 are unnecessary.
 
 ## Changes in this preview
 
-- Build the optional circuit pack with `--include-a1-ring` to add A1-Ring GP and Short alongside Road America. Choose Sunny in Autosport Clio Cup. Both A1-Ring layouts use Oschersleben's loading-screen assets.
-- Use the same `--road-america PATH` option and existing add-on memory card with either pack format. The launcher still accepts the original four-file Road America pack and the separate `--dtm-mod PATH` option.
+- Road America now uses its own course in Rain. Rebuild the optional circuit pack to enable the Rain scene with an overcast sky. Earlier packs use their imported road scene with the game's rain effects.
+- Keep the same `--road-america PATH` option and add-on memory card. The optional A1-Ring GP and Short layouts still use Sunny.
 
 Build the add-ons from your own files. [Circuit pack instructions](https://github.com/PipeKnight/toca-race-driver-3/blob/main/docs/ps2-disc-and-archives.md#add-a1-ring-gp-and-short) · [DTM model guide](https://github.com/PipeKnight/toca-race-driver-3/blob/main/docs/ps2-dtm-models.md)
 

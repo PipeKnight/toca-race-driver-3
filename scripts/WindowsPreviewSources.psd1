@@ -25,6 +25,7 @@
         'ps2-native-recomp-v0.0.5-road-america.patch'
         'ps2-native-recomp-v0.0.5-dtm-mod.patch'
         'ps2-native-recomp-v0.0.5-a1-ring.patch'
+        'ps2-native-recomp-v0.0.5-road-america-rain.patch'
     )
     DependencyArchives = @(
         'busybox-w64u-FRP-6075-g169694ebd.exe'

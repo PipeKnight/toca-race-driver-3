@@ -1,0 +1,120 @@
+--- a/runtime/src/disc.cpp
++++ b/runtime/src/disc.cpp
+@@ -56,7 +56,13 @@
+     RoadAmericaMember{"DMA1.JPK", 519440, 3590336, "JPAK", 14},
+ };
+ 
++constexpr std::array road_america_rain_members{
++    RoadAmericaMember{"TRACK.JPK", 510880, 1363456, "JPAK", 44},
++    RoadAmericaMember{"DMA1.JPK", 513312, 3568768, "JPAK", 14},
++};
++
+ constexpr std::array imported_track_ids{"TQA1", "TQA2", "TQA3"};
++constexpr unsigned road_america_rain = imported_track_ids.size() + 1;
+ constexpr std::array imported_track_folders{"", "tqa2", "tqa3"};
+ 
+ struct RoadAmerica {
+@@ -64,6 +70,7 @@
+     unsigned courses = 1;
+     std::array<std::vector<std::uint8_t>, 2> catalogs;
+     std::array<std::array<std::vector<std::uint8_t>, 2>, imported_track_ids.size()> packages;
++    std::array<std::vector<std::uint8_t>, road_america_rain_members.size()> rain;
+     // One selection per reference resource. Zero keeps the stock Oschersleben read.
+     std::array<std::atomic_uint, 2> selected{};
+ };
+@@ -71,8 +78,8 @@
+ std::unique_ptr<RoadAmerica> g_road_america;
+ std::string g_road_america_directory;
+ 
+-bool load_track_overlay(const std::filesystem::path &folder, std::size_t index, std::vector<std::uint8_t> &data) {
+-    const auto &member = road_america_members[index];
++bool load_track_overlay(const std::filesystem::path &folder, const RoadAmericaMember &member,
++                        std::vector<std::uint8_t> &data) {
+     const auto filename = os::utf8(folder / member.name);
+     std::FILE *file = os::open(filename, "rb");
+     if (!file) {
+@@ -83,9 +90,10 @@
+     const auto size = std::fread(data.data(), 1, data.size(), file);
+     const bool complete = std::fgetc(file) == EOF && !std::ferror(file);
+     std::fclose(file);
+-    const auto count = u32(data.data() + (index < 2 ? 4 : 8));
++    const bool catalog = std::string_view(member.magic) == "BIGF";
++    const auto count = u32(data.data() + (catalog ? 4 : 8));
+     if (size != data.size() || !complete || std::memcmp(data.data(), member.magic, 4) != 0 ||
+-        (count != member.entries && !(index == 0 && count == 83))) {
++        (count != member.entries && !(member.sector == road_america_members[0].sector && count == 83))) {
+         std::fprintf(stderr, "[road-america] invalid add-on member %s\n", filename.c_str());
+         return false;
+     }
+@@ -104,13 +112,25 @@
+     mod->archive_sector = archive->sector;
+     const auto root = os::path(folder);
+     for (std::size_t i = 0; i < mod->catalogs.size(); ++i) {
+-        if (!load_track_overlay(root, i, mod->catalogs[i])) return false;
++        if (!load_track_overlay(root, road_america_members[i], mod->catalogs[i])) return false;
+     }
+     if (u32(mod->catalogs[0].data() + 4) == 83) mod->courses = 3;
+     for (unsigned course = 0; course < mod->courses; ++course) {
+         const auto resources = course == 0 ? root : root / imported_track_folders[course];
+         for (std::size_t i = 0; i < mod->packages[course].size(); ++i) {
+-            if (!load_track_overlay(resources, i + 2, mod->packages[course][i])) return false;
++            if (!load_track_overlay(resources, road_america_members[i + 2], mod->packages[course][i])) return false;
++        }
++    }
++    const auto rain_folder = root / "rain";
++    std::error_code error;
++    const bool has_rain = std::filesystem::exists(rain_folder, error);
++    if (error) {
++        std::fprintf(stderr, "[road-america] could not check %s\n", os::utf8(rain_folder).c_str());
++        return false;
++    }
++    if (has_rain) {
++        for (std::size_t i = 0; i < mod->rain.size(); ++i) {
++            if (!load_track_overlay(rain_folder, road_america_rain_members[i], mod->rain[i])) return false;
+         }
+     }
+     std::fprintf(stderr, "[road-america] enabled (%u imported tracks)\n", mod->courses);
+@@ -237,10 +257,13 @@
+     for (std::size_t i = 0; i < mod.selected.size(); ++i) {
+         const auto selected = mod.selected[i].load();
+         if (!selected) continue;
+-        const auto &resource = road_america_members[i + 2];
++        const bool rain = selected == road_america_rain;
++        const auto &resource = rain ? road_america_rain_members[i] : road_america_members[i + 2];
++        const auto &data = rain ? mod.rain[i] : mod.packages[selected - 1][i];
+         const std::uint64_t offset = std::uint64_t{mod.archive_sector + resource.sector} * kSector;
+-        if (copy_overlay_range(start, out, got, offset, mod.packages[selected - 1][i]))
+-            std::fprintf(stderr, "[road-america] loading %s for %s\n", resource.name, imported_track_ids[selected - 1]);
++        if (copy_overlay_range(start, out, got, offset, data))
++            std::fprintf(stderr, "[road-america] loading %s for %s%s\n", resource.name,
++                         imported_track_ids[rain ? 0 : selected - 1], rain ? " (Rain)" : "");
+     }
+ }
+ 
+@@ -426,8 +449,24 @@
+         const auto selected = course == end ? 0u : static_cast<unsigned>(course - imported_track_ids.begin() + 1);
+         if (selected || id == "OSC1") {
+             const auto suffix = name.substr(12);
+-            if (suffix == "SUN\\TRACK.JPK") mod.selected[0].store(selected);
+-            if (suffix == "SUN\\DMA1.JPK") mod.selected[1].store(selected);
++            if (suffix.starts_with("SUN\\") || suffix.starts_with("RAI\\")) {
++                const auto member = suffix.substr(4);
++                const auto &resources = road_america_rain_members;
++                const auto it = std::find_if(resources.begin(), resources.end(),
++                                             [member](const auto &resource) { return member == resource.name; });
++                if (it != resources.end()) {
++                    auto overlay = selected;
++                    if (selected && suffix.starts_with("RAI\\")) {
++                        if (selected == 1 && !mod.rain[0].empty()) {
++                            overlay = road_america_rain;
++                        } else {
++                            // Old packs can use imported geometry with the game's rain effects.
++                            std::memcpy(g_ram + address + 12, "SUN", 3);
++                        }
++                    }
++                    mod.selected[it - resources.begin()].store(overlay);
++                }
++            }
+             if (selected) std::memcpy(g_ram + address + track_path.size(), "OSC1", 4);
+             return;
+         }
