@@ -31,6 +31,8 @@ After setup, the same command runs the local build. Use `--direct` to require an
 
 The data directory defaults to the launcher directory and holds `toca-slus-21182.ps2`, controller settings, runtime caches, and logs. The setup directory defaults to `setup` inside the data directory. After the game closes, preserve the memory card and settings before removing a portable copy. Be sure to include the separately selected data directory if you used `--data-dir`.
 
+After updating the launcher package, run once without `--direct` to prepare the updated runtime. The [version 11 checkpoint format](native-recompilation.md#preserve-buffered-adpcm-end-flags-in-version-11-checkpoints) retains additional SPU2 state. To resume normal game progress, open the profile on the portable memory card.
+
 The launcher returns exit code `2` for an invalid argument or unsupported disc and `3` for an incomplete setup or a build failure. It passes through the game process exit code after launch.
 
 ## Verification

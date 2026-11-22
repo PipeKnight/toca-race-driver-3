@@ -1,0 +1,102 @@
+diff --git a/runtime/src/iop/spu2.cpp b/runtime/src/iop/spu2.cpp
+--- a/runtime/src/iop/spu2.cpp
++++ b/runtime/src/iop/spu2.cpp
+@@ -912,9 +912,13 @@
+     s.vec(g_ram);
+     for (Core &k : g_cores) {
+         s.pod(k.voices);
+-        if (s.loading())
++        if (s.version() >= 11) {
++            // A DMA write can change RAM after a voice has already decoded a block.
++            s.pod(g_block_end[&k - g_cores]);
++        } else if (s.loading()) {
+             for (const Voice &v : k.voices)
+                 for (int i = 0; i < 2; ++i) block_end(v)[i] = (g_ram[v.block[i] & kRamMask] >> 8) & 1u;
++        }
+         s.pod(k.attr);
+         s.pod(k.admas);
+         s.pod(k.irqa);
+diff --git a/runtime/src/system.cpp b/runtime/src/system.cpp
+--- a/runtime/src/system.cpp
++++ b/runtime/src/system.cpp
+@@ -493,7 +493,7 @@
+ namespace {
+
+ constexpr char kStateMagic[8] = {'P', 'S', '2', 'S', 'T', 'A', 'T', 'E'};
+-constexpr std::uint32_t kStateVersion = 10;
++constexpr std::uint32_t kStateVersion = 11;
+
+ std::function<void()> event_action(int id, std::uint64_t at) {
+     if (id == hw::kEventVblank) return vblank;
+@@ -524,6 +524,7 @@
+     // 8 adds the IOP's low-level hardware timers (AllocHardTimer, SetTimerCompare, SetTimerMode) that raise an interrupt;
+     // 9 adds the count of GS FINISH events that wait until the game has cleared CSR.FINISH.
+     // 10 stores the SPU2 envelope visible to register reads before the first mixer update after key-on.
++    // 11 stores the end flags of ADPCM blocks already buffered by the SPU2.
+     if (version < 4 || version > kStateVersion) throw std::runtime_error("state file from another version");
+     s.set_version(version);
+     s.tag("ee");
+diff --git a/tests/spu2_envx_state.cpp b/tests/spu2_envx_state.cpp
+--- a/tests/spu2_envx_state.cpp
++++ b/tests/spu2_envx_state.cpp
+@@ -48,6 +48,51 @@
+     write(kAdsr1, kFastAttack);
+     write(kAdsr2, 0x1FC0);
+     write(kKeyOn, 1);
++}
++
++void check_buffered_end_flags() {
++    constexpr std::uint32_t kSecondCore = 0x400;
++    constexpr std::uint32_t kPitch = 0x004;
++    constexpr std::uint32_t kSampleStartLow = 0x1C2;
++    constexpr std::uint32_t kEndx = 0x340;
++    constexpr std::uint32_t kFirstSample = 0x5000;
++    constexpr std::uint32_t kSecondSample = 0x6000;
++    constexpr std::uint32_t kBlockWords = 8;
++    constexpr std::uint16_t kEndBlock = 0x0100;
++
++    iop::reset();
++    spu::ram()[kSecondSample + kBlockWords] = kEndBlock;
++    for (const auto core : {0u, kSecondCore}) {
++        write(core + kAdsr1, kFastAttack);
++        write(core + kAdsr2, 0x1FC0);
++        write(core + kPitch, 0x1000);
++        write(core + kSampleStartLow, core == 0 ? kFirstSample : kSecondSample);
++        write(core + kKeyOn, 1);
++    }
++
++    // A streaming write can overwrite an ADPCM header after the voice has buffered it.
++    spu::ram()[kFirstSample] = kEndBlock;
++    spu::ram()[kSecondSample + kBlockWords] = 0;
++    const auto checkpoint = save_iop(11);
++    const auto legacy = save_iop(10);
++
++    const auto play = [&] { iop::run(65 * kEeCyclesPerSample); };
++    const auto check = [&](const char *first, const char *second) {
++        expect(spu::read(kEndx, 2) & 1u, 0, first);
++        expect(spu::read(kSecondCore + kEndx, 2) & 1u, 1, second);
++    };
++
++    play();
++    check("a live voice continues after its buffered header is changed", "a live voice still ends at its buffered end block");
++
++    restore_iop(checkpoint);
++    play();
++    check("checkpoint retains the original current block flag", "checkpoint retains the original next block flag on core 1");
++
++    restore_iop(legacy);
++    play();
++    expect(spu::read(kEndx, 2) & 1u, 1, "legacy checkpoint derives the current block flag from RAM");
++    expect(spu::read(kSecondCore + kEndx, 2) & 1u, 0, "legacy checkpoint derives the next block flag from RAM");
+ }
+ }
+
+@@ -101,6 +146,8 @@
+     expect(read(), 0x7000, "a configuration write in core 1 leaves core 0's envelope independent");
+     expect(spu::read(kSecondCore + kVoice17 + kEnvx, 2), 0x3800, "only the selected voice uses the new rate");
+
++    check_buffered_end_flags();
++
+     std::printf("%d SPU2 checks, %d failed\n", checks, failures);
+     return failures != 0;
+ }

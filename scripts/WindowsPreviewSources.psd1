@@ -15,6 +15,7 @@
         'ps2-native-recomp-v0.0.5-toca-reflections.patch'
         'ps2-native-recomp-v0.0.5-gs-upload-cache-overlap.patch'
         'ps2-native-recomp-v0.0.5-spu2-envx-preview.patch'
+        'ps2-native-recomp-v0.0.5-spu2-checkpoint-blocks.patch'
         'ps2-native-recomp-v0.0.5-dvd-chd.patch'
         'ps2-native-recomp-v0.0.5-dvd-chd-setup.patch'
         'ps2-native-recomp-v0.0.5-dvd-folder.patch'
