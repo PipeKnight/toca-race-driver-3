@@ -211,6 +211,8 @@ The `.aid` files identify two distinct layouts. `a12.aid` has 114 primary route 
 
 The first geometry pass converted 13 of the 14 members for each layout. The remaining `tri.dma` member has a zero-length REF at the end of its payload, a valid leaf with no vertices. The converter now preserves the no-op packet and excludes the empty leaf when calculating parent bounds. Both complete scene packages fit in the 3,590,336-byte reference `DMA1.JPK`. Rebuilding the Road America add-on with this change produced the same four files byte for byte.
 
+The `a11`, `a12`, and `a13` packages have byte-identical sky, lighting, texture settings, and fog settings. The `a13` scene differs from `a11`, and they share their GP collision data. This inventory establishes a second GP scene with the same weather assets.
+
 Both donor routes have a 79-point pit route. The auxiliary route has 36 points for GP and 28 for Short, matching the lap-boundary checkpoint spans. Local conversion to RD3 `AILD` produced 22,100 bytes for GP and 11,092 bytes for Short. Both routes and their matching collision data fit in the reference `TRACK.JPK`.
 
 Two isolated Windows 11 Direct3D 12 runs first tested the converted layouts through `tqa1` one at a time. The menu displayed A1-Ring GP at 2.7 miles and A1-Ring Short at 1.4 miles. Each pass loaded its donor `TRACK.JPK` and `DMA1.JPK`, rendered the pit straight, and reached about ten seconds of driving with AI cars on track. Local evidence is in `local/road-america-launch/a11/` and `local/road-america-launch/a12/`. Use the [expanded add-on](#add-a1-ring-gp-and-short) to select either layout alongside Road America.
@@ -287,6 +289,8 @@ Windows preview 5 recognizes the optional `rain` folder in the circuit pack. The
 Rebuild the pack in a new directory using the same two disc directories and point `--road-america` at it. Your add-on memory card follows the data directory. Older packs with their four original files still load. Their Rain selection runs the imported Sunny scene with the game's rain effects. A pack that supplies a `rain` directory needs both files in that directory.
 
 The original preview 4 replay selected Road America Rain and reached the Oschersleben starting straight. On the current backend, a Direct3D 12 replay with the rebuilt pack loaded both dedicated Rain packages and rendered the Road America straight under overcast skies. A four-file pack reached the same course with its existing scene and rain effects. Stock Oschersleben still loaded its original Rain packages while the expanded pack was active. A pack with only one Rain file was rejected before guest startup. The local runs are under `local/a1-ring-pack/` in `gp-road-rain-original/`, `gp-road-rain-final-grid/`, `gp-four-file-rain-regression/`, and `gp-stock-rain-fixed/`.
+
+An RTX 4070 run completed the one-lap Autosport Clio Cup Free Race in **2:55.67**. Replaying the controller inputs on the release backend matched all 742 checkpoints from the grid through the finish. Race Results classified Player One **17th of 20**. Continuing produced the autosave and wrote 772 pages. The saved card passed the filesystem and ECC checks, and a cold launch loaded the profile with zero writes and an unchanged checksum. The replay evidence is in `gp-rain-full-replay/` and `gp-rain-replay-reload/`.
 
 ### Add A1-Ring GP and Short
 
