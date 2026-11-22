@@ -14,9 +14,43 @@ from BuildRoadAmericaMod import (
 from BuildTrackCollisionOverlay import encode_lzss, encode_lzss_compact
 from ModAssets import find_member, replace_member
 from Ps2CarModel import mesh_export, mesh_import, mesh_packets
+from Ps2TrackCollision import CELL, GRID_CELLS, POLYGON, REFERENCE, TRIANGLE, VERTEX, Collision, collision_append
 
 
 class ModAssetTests(unittest.TestCase):
+    def test_collision_append_remaps_existing_references_and_adds_the_authored_face(self):
+        first_cell, later_cell, existing_reference = 2 * 256 + 2, 220 * 256 + 220, 221 * 256 + 220
+        source_vertices = b"".join(VERTEX.pack(0, 100, 200, x, z) for x, z in
+                                   ((2, 2), (3, 2), (2, 3), (220, 220), (221, 220), (220, 221)))
+        original_polygons = POLYGON.pack(0xffff, 7, 0) + POLYGON.pack(0xffff, 9, 1)
+        original_faces = TRIANGLE.pack(0, 1, 2) + TRIANGLE.pack(3, 4, 5)
+        cells = b"".join(CELL.pack(int(i > first_cell) + int(i > later_cell), int(i > existing_reference))
+                         for i in range(GRID_CELLS))
+        grid = cells + REFERENCE.pack(1)
+        original = struct.pack("<6f4I", 0, 0, 0, 256, 8, 256, len(grid), 2, 6, 0)
+        original += source_vertices + original_polygons + original_faces + grid
+        flags = b"\xa5" * (GRID_CELLS // 8)
+        original += bytes(-len(original) % 4) + flags
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            template, obj, output = root / "stock.col", root / "hump.obj", root / "edited.col"
+            template.write_bytes(original)
+            obj.write_text("v 10 3 30\nv 14 3 30\nv 10 3 34\nf -3 -2 -1\n", encoding="ascii")
+            collision_append(SimpleNamespace(input=template, output=output, obj=obj, surface_from=0))
+            mesh = Collision(output.read_bytes())
+
+        self.assertEqual(mesh.flags, flags)
+        self.assertEqual(mesh.raw_vertices[:len(source_vertices)], source_vertices)
+        self.assertEqual(mesh.triangles, ((0, 1, 2), (6, 7, 8), (3, 4, 5)))
+        self.assertEqual(mesh.polygons, original_polygons[:4] + POLYGON.pack(0xffff, 7, 0) + original_polygons[4:])
+        def in_cell(cell):
+            return mesh.references[mesh.starts[cell][1]:mesh.starts[cell + 1][1]]
+
+        self.assertEqual(in_cell(existing_reference), (2,))
+        self.assertEqual(in_cell(33 * 256 + 13), (1,))
+        self.assertAlmostEqual(mesh.world(mesh.vertices[6])[1], 3, places=3)
+
     def test_track_catalog_moves_directory_base_for_separate_imported_slots(self):
         reserved = {course.record for course in (ROAD_AMERICA, *A1_RING)}
         stock = {

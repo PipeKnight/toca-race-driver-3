@@ -19,6 +19,7 @@ from BuildTrackCollisionOverlay import (
     collision_counts, encode_lzss, encode_lzss_compact, read_exact, verify_directory,
 )
 from BuildTrackGeometryOverlay import DMA_BYTES, DMA_SECTOR
+from Ps2TrackCollision import collision_append, collision_export
 
 
 REFERENCE_PACKAGES = {
@@ -280,6 +281,8 @@ def main():
         ("part-map-import", "serialize part map JSON to a new binary file", part_map),
         ("collision-info", "validate collision bounds and triangle indices", collision_info),
         ("collision-surface", "copy a triangle's surface type within a collision mesh", collision_surface),
+        ("collision-export", "export a PS2 collision mesh as a triangle OBJ in game coordinates", collision_export),
+        ("collision-append", "add triangles from an OBJ to an existing PS2 collision mesh", collision_append),
         ("route-obj", "export AILD version 9 routes as flat OBJ polylines", route_obj),
     ):
         command = commands.add_parser(name, help=help_text)
@@ -289,6 +292,10 @@ def main():
         if name == "collision-surface":
             command.add_argument("--triangle", type=int, required=True, help="zero-based destination triangle index")
             command.add_argument("--from-triangle", type=int, required=True, help="zero-based source triangle index")
+        if name == "collision-append":
+            command.add_argument("--obj", type=Path, required=True, help="triangulated OBJ in game coordinates")
+            command.add_argument("--surface-from", type=int, required=True,
+                                 help="copy the surface type of this zero-based template triangle")
         command.set_defaults(run=handler)
     args = parser.parse_args()
     try:

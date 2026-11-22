@@ -44,7 +44,7 @@ python scripts/ModAssets.py collision-info "$work\col.col"
 python scripts/ModAssets.py extract --disc $disc --package oschersleben-track --inside osc1.big osc1.ail "$work\osc1.ail"
 ```
 
-`collision-info` checks the mesh bounds, array lengths, and triangle indices, and lists the existing surface types with a sample triangle for each type. A collision file holds a 40-byte header, eight bytes per packed vertex, four bytes of per-triangle information, three 16-bit indices per triangle, a spatial cell table, and a trailer in the reference sample. The surface type occupies the third byte of each per-triangle record. `collision-surface` copies that byte between triangles using zero-based indices. When changing collision topology, keep the surface data and cell lists consistent with the triangle indices. Generating the cell data for newly authored collision meshes remains a separate step. [Collision template](https://github.com/Nenkai/010GameTemplates/blob/main/Codemasters/Race_Driver_3/HeightData_col.col.bt) · [PS2 collision research](ps2-disc-and-archives.md#stock-ps2-dtm-models-and-oschersleben-collision)
+`collision-info` checks the mesh bounds, array lengths, and triangle indices, and lists the existing surface types with a sample triangle for each type. `collision-surface` copies a triangle's surface type using zero-based indices. Use `collision-export` to inspect the physical track mesh in an OBJ editor and `collision-append` to add new triangles and their cell data. [PS2 collision research](ps2-disc-and-archives.md#authoring-ps2-collision)
 
 To visualize the route in an editor with an OBJ importer, run `route-obj` on the converted Road America `AILD` v9 member. The OBJ contains three groups of polylines for the main, pit, and auxiliary sections. It has the game's X/Z coordinates and sets Y to zero. Compare the shape to the donor scene before testing checkpoints, pit entry, or AI.
 
@@ -74,6 +74,25 @@ On Windows 11 Direct3D 12 the experimental course reached frame 8350 from power-
 The importer can build a [three-course pack](ps2-disc-and-archives.md#add-a1-ring-gp-and-short) with Road America, A1-Ring GP, and A1-Ring Short in separate slots. To edit an A1-Ring member, copy the entire expanded pack and edit the files under `tqa2` or `tqa3`. Keep the two catalogs and all three resource pairs in the candidate. Both A1-Ring layouts have passed Free Race and Time Trial with autosave. The [local lap records](ps2-disc-and-archives.md#local-lap-records) for all three imports coexist in one profile.
 
 For a Road America edit that applies in both weather settings, edit the corresponding package member at the root and under `rain`. The root files supply Sunny, and the extra pair supplies Rain. Use a separate pack directory for the experiment. [Road America in Rain](ps2-disc-and-archives.md#road-america-in-rain)
+
+### Add a new collision shape
+
+Use the exported template as a placement reference in your OBJ editor. Author the new surface as its own mesh and export just that mesh as triangulated OBJ. Use the game's XYZ coordinates in metres, with Y up. Keep the new vertices within the exported mesh's collision bounds and point drivable faces upward. The new triangles use the surface type of the zero-based triangle you select with `--surface-from`. Choose an asphalt example from `collision-info` for a ramp or speed hump.
+
+```powershell
+$trial = 'D:\Mods\Road America Hump'
+Copy-Item -LiteralPath $addon -Destination $trial -Recurse
+python scripts/ModAssets.py extract --file "$addon\TRACK.JPK" col.col "$work\source.col"
+python scripts/ModAssets.py collision-export "$work\source.col" "$work\placement.obj"
+python scripts/ModAssets.py collision-info "$work\source.col"
+# Save your triangulated ramp as ramp.obj in the work folder.
+python scripts/ModAssets.py collision-append "$work\source.col" "$work\with-ramp.col" --obj "$work\ramp.obj" --surface-from 1598
+python scripts/ModAssets.py replace --file "$addon\TRACK.JPK" col.col "$work\with-ramp.col" "$work\TRACK.JPK"
+Copy-Item -LiteralPath "$work\TRACK.JPK" -Destination "$trial\TRACK.JPK"
+.\TocaRecomp.exe --disc 'D:\Games\TOCA Race Driver 3.iso' --road-america $trial --data-dir "$work\test-player"
+```
+
+Triangle 1598 supplies asphalt on the reference Road America pack. Test the Sunny course in a separate profile. The physical shape is independent of road rendering, which still comes from `DMA1.JPK`. The importer retains the template's terrain and edge flags, reindexes the existing cell references, and checks the PS2 cache limit for the affected cells. Replacing the entire course still requires a compatible visual scene, route, and event entry.
 
 ## Cars
 
