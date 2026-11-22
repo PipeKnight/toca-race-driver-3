@@ -6,6 +6,7 @@ The current test target is the North American PS2 release, `SLUS-21182` v1.02. T
 
 - [Windows preview launcher and first-run setup](docs/windows-preview.md)
 - [Developer build and verification](docs/native-recompilation.md)
+- [Linux developer build](docs/linux-development.md)
 - [Supported disc and archive research](docs/ps2-disc-and-archives.md)
 - [Project plan](PLAN.md) and [acceptance checklist](docs/acceptance-checklist.md)
 
