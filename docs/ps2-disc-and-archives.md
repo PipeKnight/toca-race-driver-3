@@ -229,4 +229,18 @@ With all 14 donor DMA members supplied, the controller harness completed one lap
 
 At frame 19400, the race HUD and finish menu were visible over a white background. The road and trackside objects appeared in other sections, including frame 11100 of the first driving attempt. The CPU renderer reproduced the white start straight. Using the donor's alternate weather package and its lighting and texture settings changed the colours while leaving the start scene corrupted. Single-member comparisons at frame 8400 showed that stock `sky.dma` restored the sky and stock `hor.dma` restored the distant terrain. The stock `sha.dma` substitution left the white background. With both background layers restored, the start straight still lacked its road surface.
 
-The local screenshots and input recordings are under `local/qa-circuit-drive/`. The classified result is in `roa-player-result/frames/frame_20338.png`, and the repeatability check is in `roa-race-results/trace.log`. The remaining acceptance tests cover a complete rendered lap and independent record storage for the slot.
+The local screenshots and input recordings are under `local/qa-circuit-drive/`. The first classified result is in `roa-player-result/frames/frame_20338.png`, and the repeatability check is in `roa-race-results/trace.log`.
+
+### Road America geometry conversion
+
+The Race Driver 3 draw function at `0x001e6a88` expects the minimum and maximum bounds of a scene node at offsets `0x20` and `0x30`, four child pointers at `0x50` through `0x5c`, and a leaf flag at `0x60`. The corresponding Race Driver 2 node is 64 bytes, with its child pointers at `0x28` through `0x34` and its leaf flag at `0x38`. Supplying the older layout let the archive loader relocate the DMA data, then gave the newer draw function invalid bounds and child fields.
+
+The converter builds aligned 112-byte nodes, redirects the roots and child pointers, and preserves the original DMA packets. It reads the leaf bounds from the coordinate triples in the VIF payload and computes each branch's bounds from its children. The same calculation reproduced the stored boxes of 729 position-bearing leaves and 309 branches in the reference Oschersleben package exactly. Road America rebuilt 1,204 nodes across 14 members.
+
+```powershell
+python scripts/BuildTrackGeometryOverlay.py "<extracted RD3 disc>" "F:/" "local/road-america-geometry.jpk"
+```
+
+The tool reads both discs and creates a local `DMA1.JPK` overlay within the original 3,590,336-byte archive extent. A slot-scoped diagnostic runner using this output loaded the imported course and the original Oschersleben in separate Free Race runs. The archive trace activated the two overlays when the loader requested `TQA1` and left them inactive for `OSC1`.
+
+On Windows 11 with Direct3D 12, the corrected run rendered the pit straight, road surfaces, scenery, and sky in captures around the full lap. **Race Results** classified **Player One (P1)** **20th of 20** at **3:06.68** without a penalty. The finish wrote an autosave to the isolated test card. Replaying the recorded input matched all 793 checkpoints through the finish. A separate CPU-renderer check showed the same restored start straight. Evidence is under `local/qa-circuit-drive/`, including `roa-bounded-lap/frames/frame_19200.png`, `roa-bounded-result/frames/frame_20298.png`, and `roa-bounded-cpu/frames/frame_07800.png`. Independent record storage and normal launcher integration remain open.
