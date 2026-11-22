@@ -206,7 +206,7 @@ def jpak_entries(original, count):
         yield first_data, 32 + index * JPAK_ENTRY.size, label, row
 
 
-def repack_jpak(original, count, replacements, extent=None):
+def repack_jpak(original, count, replacements, extent=None, *, compressor=encode_lzss):
     entries = list(jpak_entries(original, count))
     output = bytearray(original[:entries[0][0]])
     seen = set()
@@ -216,7 +216,9 @@ def repack_jpak(original, count, replacements, extent=None):
         if name in replacements:
             seen.add(name)
             raw = bytes(replacements[name])
-            data = encode_lzss(raw) if flags & 1 else raw
+            data = compressor(raw) if flags & 1 else raw
+            if len(data) >= len(raw):
+                data = raw
             expanded = len(raw)
         output.extend(bytes(-len(output) % 64))
         struct.pack_into("<III", output, entry + 4, len(data), len(output), expanded)
@@ -225,7 +227,7 @@ def repack_jpak(original, count, replacements, extent=None):
         raise ValueError("Reference JPAK is missing a required member")
     if extent is not None:
         if len(output) > extent:
-            raise ValueError("Repacked TRACK.JPK exceeds the original disc read extent")
+            raise ValueError("Repacked JPAK exceeds the original package extent")
         output.extend(bytes(extent - len(output)))
     return output
 

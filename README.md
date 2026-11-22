@@ -8,6 +8,7 @@ The current test target is the North American PS2 release, `SLUS-21182` v1.02. T
 - [Developer build and verification](docs/native-recompilation.md)
 - [Linux developer build](docs/linux-development.md)
 - [Supported disc and archive research](docs/ps2-disc-and-archives.md)
+- [PS2 track and car modding guide](docs/modding.md)
 - [Build and play the experimental Road America add-on](docs/ps2-disc-and-archives.md#play-road-america-from-your-own-discs)
 - [Project plan](PLAN.md) and [acceptance checklist](docs/acceptance-checklist.md)
 

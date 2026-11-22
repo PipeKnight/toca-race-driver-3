@@ -2,6 +2,7 @@
 """Build a Road America collision overlay for the local QA Circuit experiment."""
 
 import argparse
+from array import array
 from collections import defaultdict, deque
 import hashlib
 import math
@@ -98,6 +99,68 @@ def encode_lzss(data):
             for position in range(cursor, min(cursor + match_length, len(data) - 2)):
                 positions[data[position:position + 3]].append(position)
             cursor += match_length
+    return packed
+
+
+def encode_lzss_compact(data):
+    """Choose a smaller encoding when the normal encoding does not fit a JPAK slot."""
+    size = len(data)
+    lengths = bytearray(size)
+    ring_positions = array("H", [0]) * size
+    history = defaultdict(deque)
+
+    for position in range(size - 2):
+        expired = position - 4097
+        if expired >= 0:
+            expired_key = data[expired:expired + 3]
+            history[expired_key].popleft()
+            if not history[expired_key]:
+                del history[expired_key]
+        previous_positions = history[data[position:position + 3]]
+        limit = min(18, size - position)
+        for previous in reversed(previous_positions):
+            length = 3
+            while length < limit and data[position + length] == data[previous + length]:
+                length += 1
+            if length > lengths[position]:
+                lengths[position] = length
+                ring_positions[position] = (previous + 0xFEE) & 0xFFF
+            if length == limit:
+                break
+        previous_positions.append(position)
+
+    # Costs depend on the next slot in the flag byte and at most 18 future source bytes.
+    window = 19
+    costs = [[0] * window for _ in range(8)]
+    choices = [bytearray(size) for _ in range(8)]
+    for position in range(size - 1, -1, -1):
+        for slot, cost in enumerate(costs):
+            next_cost = costs[(slot + 1) % 8]
+            best = 1 + next_cost[(position + 1) % window]
+            for length in range(3, lengths[position] + 1):
+                candidate = 2 + next_cost[(position + length) % window]
+                if candidate < best:
+                    best = candidate
+                    choices[slot][position] = length
+            cost[position % window] = best + (slot == 0)
+
+    packed = bytearray()
+    position = 0
+    while position < size:
+        flags = len(packed)
+        packed.append(0)
+        for slot in range(8):
+            if position == size:
+                break
+            match = choices[slot][position]
+            if match:
+                ring_position = ring_positions[position]
+                packed.extend((ring_position & 0xFF, (ring_position >> 4 & 0xF0) | (match - 3)))
+                position += match
+            else:
+                packed[flags] |= 1 << slot
+                packed.append(data[position])
+                position += 1
     return packed
 
 
