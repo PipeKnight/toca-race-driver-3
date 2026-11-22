@@ -1,4 +1,5 @@
 @{
+    SetupRevision = 2
     Backend = @{
         File = 'ps2-native-recomp-v0.0.5.zip'
         Url = 'https://github.com/exoteric33/ps2-native-recomp/releases/download/v0.0.5/ps2-native-recomp-v0.0.5.zip'

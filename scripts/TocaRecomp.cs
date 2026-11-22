@@ -8,7 +8,7 @@ using System.Text;
 
 internal static class TocaRecomp
 {
-    private const string Version = "0.1.0-dev";
+    private const string Version = "0.1.0-preview.1";
 
     private const string Usage =
         "Usage: TocaRecomp.exe --disc PATH [--data-dir PATH] [--setup-dir PATH]\n" +

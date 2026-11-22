@@ -31,7 +31,8 @@ tar -xf "$repo/.tools/downloads/libchdr-v0.3.0.tar.gz"
 
 for patch in toca-reflections gs-upload-cache-overlap spu2-envx-preview \
     spu2-checkpoint-blocks dvd-chd dvd-chd-setup dvd-folder windows-portable; do
-    git apply --no-index "$repo/patches/ps2-native-recomp-v0.0.5-$patch.patch" </dev/null || exit 1
+    GIT_CEILING_DIRECTORIES="$work" git apply --no-index \
+        "$repo/patches/ps2-native-recomp-v0.0.5-$patch.patch" </dev/null || exit 1
 done
 
 CXX=clang++-18 PS2_PORT_DIRECT_ISO=1 \

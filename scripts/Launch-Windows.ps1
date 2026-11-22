@@ -22,7 +22,7 @@ $archives = Join-Path $PSScriptRoot 'sources'
 $patches = @($sources.Patches | ForEach-Object { Join-Path $PSScriptRoot "patches\$_" })
 
 function Get-SetupKey {
-    $parts = @($sources.Backend.SHA256, $sources.Chd.SHA256)
+    $parts = @($sources.SetupRevision, $sources.Backend.SHA256, $sources.Chd.SHA256)
     $parts += @(Get-FileHash -LiteralPath $patches | Select-Object -ExpandProperty Hash)
     $sha = [Security.Cryptography.SHA256]::Create()
     try {
@@ -68,9 +68,23 @@ function Install-Backend([string]$Destination) {
             if (!(Test-Path -LiteralPath $compiler -PathType Leaf)) { throw 'The portable toolchain is incomplete.' }
 
             $git = Join-Path $toolchain 'mingit\cmd\git.exe'
-            foreach ($patch in $patches) {
-                & $git apply --no-index -- $patch
-                if ($LASTEXITCODE -ne 0) { throw "Could not apply $(Split-Path -Leaf $patch)." }
+            $gitEnvironment = @{}
+            $gitVariables = 'GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR', 'GIT_CEILING_DIRECTORIES'
+            foreach ($name in $gitVariables) {
+                $gitEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
+            }
+            try {
+                foreach ($name in $gitVariables) { [Environment]::SetEnvironmentVariable($name, $null, 'Process') }
+                # Apply paths relative to the extracted sources even inside an existing Git checkout.
+                $env:GIT_CEILING_DIRECTORIES = $stage
+                foreach ($patch in $patches) {
+                    & $git apply --no-index -- $patch
+                    if ($LASTEXITCODE -ne 0) { throw "Could not apply $(Split-Path -Leaf $patch)." }
+                }
+            } finally {
+                foreach ($name in $gitVariables) {
+                    [Environment]::SetEnvironmentVariable($name, $gitEnvironment[$name], 'Process')
+                }
             }
         } finally {
             Pop-Location
