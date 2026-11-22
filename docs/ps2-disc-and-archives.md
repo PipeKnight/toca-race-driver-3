@@ -207,4 +207,26 @@ A scan found sector-aligned `BIGF` packages containing PS2 DMA geometry and `col
 | `a12` | 808,393 | `a12_trk.dma` | 10,826 | 16,642 |
 | `a13` | 811,291 | `a13_trk.dma` | 12,906 | 18,704 |
 
-The sampled collision members have valid bounds and triangle indices within their vertex arrays when parsed with the Race Driver 3 collision layout. This establishes a shared structure for further tests. The importer still needs to verify runtime collision behavior, DMA geometry compatibility, and conversion of checkpoint and AI data. The configuration keys for A1-Ring Short and GP also need to be mapped to their display names. The read-only inventory and member-offset report are in `race-driver-2-packages.json` and `race-driver-2-track-formats.json` under `local/qa-circuit-drive/`.
+The sampled collision members have valid bounds and triangle indices within their vertex arrays when parsed with the Race Driver 3 collision layout. The configuration keys for A1-Ring Short and GP still need to be mapped to their display names. The read-only inventory and member-offset report are in `race-driver-2-packages.json` and `race-driver-2-track-formats.json` under `local/qa-circuit-drive/`.
+
+### Road America import probes
+
+The collision probe builds a local `TRACK.JPK` from both disc copies. It replaces the compressed `col.col` entry, preserves the other package member offsets and data, and keeps the original 1,378,240-byte read extent. The tool checks the two disc directory fingerprints and opens the output as a new file.
+
+```powershell
+python scripts/BuildTrackCollisionOverlay.py "<extracted RD3 disc>" "F:/" "local/road-america-collision.jpk"
+```
+
+The QA Circuit runner supplied the overlay at disc sector 1,290,112. At frame 8300, the donor header was present at EE RAM address `0x01281540`. All 11,227 vertices, 16,940 triangles' indices, and the collision grid matched the donor byte for byte. At the same address in the stock control, those arrays matched Oschersleben. The collision-only probe retained the stock grid and visual meshes, which left the visible road and physical terrain in different positions.
+
+The RD2 `roa.aid` main section contains five coordinate arrays and 387 event and distance records. Its start record stores a lap distance of 6,056.77 metres. The first two secondary sections contain 42 pit-route nodes and 50 auxiliary-route nodes. The 50-node section spans main-route node 346 through node 8 across the lap boundary, matching the count check in the RD3 `AILD` version 9 reader at `0x0020e928` and its initializer at `0x0020e458`.
+
+An experimental conversion supplied `AILD` version 9 to QA Circuit in the uncompressed nested `osc1.ail` entry, along with the donor collision. The full 25,308-byte converted route matched guest RAM at `0x0127b240`. The player grid position moved to `(36.78, 14.07, -499.51)` with the car facing along the donor start straight. The race started and AI cars advanced on the new route. An earlier test that compressed this nested member left the game on the loading screen because the member's flags expect raw bytes.
+
+The stock `trk.dma` and donor `roa_trk.dma` both end with a relocation table and a footer containing its count, the payload length, and the original address. The RD3 loader relocated the donor's root from `0x00b12344` to `0x0165cec4` and rebased all 102 type-3 records tested.
+
+With all 14 donor DMA members supplied, the controller harness completed one lap and the game displayed the checkered flag at **3:05.21**. A replay matched all 794 checkpoints through the finish. At frame 20338 of the finish-menu check, **Race Results** classified **Player One (P1)** **20th of 20** at **3:25.21**, including a 20-second penalty. Continuing from the finish wrote an autosave to the isolated test card.
+
+At frame 19400, the race HUD and finish menu were visible over a white background. The road and trackside objects appeared in other sections, including frame 11100 of the first driving attempt. The CPU renderer reproduced the white start straight. Using the donor's alternate weather package and its lighting and texture settings changed the colours while leaving the start scene corrupted. Single-member comparisons at frame 8400 showed that stock `sky.dma` restored the sky and stock `hor.dma` restored the distant terrain. The stock `sha.dma` substitution left the white background. With both background layers restored, the start straight still lacked its road surface.
+
+The local screenshots and input recordings are under `local/qa-circuit-drive/`. The classified result is in `roa-player-result/frames/frame_20338.png`, and the repeatability check is in `roa-race-results/trace.log`. The remaining acceptance tests cover a complete rendered lap and independent record storage for the slot.
