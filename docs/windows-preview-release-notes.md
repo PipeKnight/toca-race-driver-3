@@ -2,6 +2,15 @@
 
 Version `0.1.0-preview.3` is a development preview for the North American PS2 disc `SLUS-21182` v1.02. Use a disc image from your own copy. The launcher compiles the original executable locally and reads the original disc at runtime. A PS2 BIOS and PCSX2 are unnecessary.
 
+## Changes in this preview
+
+- First-run setup supports Windows paths with spaces and square brackets.
+- `--road-america PATH` loads a locally built Road America add-on from your Race Driver 2 and TOCA Race Driver 3 discs. Choose Sunny in Autosport Clio Cup.
+- `--dtm-mod PATH` loads a local DTM car package or Mercedes C-Class high-detail mesh. The project includes tools for inspecting, exporting, and editing the supported PS2 assets.
+- Stock play uses its existing portable memory card. The Road America, DTM, and combined options each select their own card.
+
+Build the add-ons from your own files. [PS2 modding guide](https://github.com/PipeKnight/toca-race-driver-3/blob/main/docs/modding.md) · [DTM model guide](https://github.com/PipeKnight/toca-race-driver-3/blob/main/docs/ps2-dtm-models.md)
+
 ## First launch
 
 Place `TocaRecomp.exe` in a writable folder. The executable bundles its setup files. Open PowerShell in that folder and pass the path to your ISO.
@@ -20,4 +29,4 @@ The launcher folder holds the memory card `toca-slus-21182.ps2` and game setting
 
 ## Verification scope
 
-Clean Windows Sandbox tests built the game from the ISO both online and offline. Recorded Windows 11 tests reached the finish and restored championship progress, including Silverstone National and UK Rally 3. The latest checkpoint fixes preserve the SPU2's buffered ADPCM end flags. Stream-buffer warnings can still occur on Silverstone and UK Rally 3, and software graphics can cause audio underruns. [Windows verification and open acceptance items](https://github.com/PipeKnight/toca-race-driver-3/blob/main/docs/acceptance-checklist.md)
+The Windows Sandbox setup checks use software graphics. The Direct3D 12 race checks use an existing Windows 11 installation. Road America finished a Free Race in 3:06.68 and restored a 2:47.56 Time Trial ghost after a restart. The DTM tests loaded edited stock meshes. General-purpose car import, extra Road America weather, and full-game desktop acceptance remain open. Stream-buffer warnings can still occur on Silverstone and UK Rally 3, and software graphics can cause audio underruns. [Windows verification and open acceptance items](https://github.com/PipeKnight/toca-race-driver-3/blob/main/docs/acceptance-checklist.md)

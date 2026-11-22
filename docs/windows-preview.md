@@ -2,7 +2,7 @@
 
 The launcher packages the first-run setup for Windows 11 x64. Supply your own North American PS2 disc, `SLUS-21182` v1.02, as an ISO, a matching DVD CHD, or a directory of extracted disc files. Keep the disc available at launch. The launcher builds the runner locally and reads the original disc in place. The package includes the launcher, setup scripts, patches, and pinned upstream source archives.
 
-The current Windows release, `v0.1.0-preview.2`, ships as a single portable `TocaRecomp.exe`. It loads the previous preview's saves and settings. Clean installation was verified in Windows Sandbox with software graphics. Full races on Direct3D 12 used an existing Windows installation. [Windows x64 release](https://github.com/PipeKnight/toca-race-driver-3/releases/tag/v0.1.0-preview.2)
+The current Windows release, `v0.1.0-preview.3`, ships as a single portable `TocaRecomp.exe`. It reloads the previous preview's saves and settings and adds optional Road America and DTM overlays. Clean installation was verified in Windows Sandbox with software graphics. Direct3D 12 race tests used an existing Windows installation. [Windows x64 release](https://github.com/PipeKnight/toca-race-driver-3/releases/tag/v0.1.0-preview.3)
 
 The earlier `0.1.0-preview.1` archive requires its `support` directory next to `TocaRecomp.exe`. [Previous Windows release](https://github.com/PipeKnight/toca-race-driver-3/releases/tag/v0.1.0-preview.1)
 
@@ -26,7 +26,7 @@ From the package directory, run the launcher with the path to your disc.
 
 The first launch fetches and verifies the portable compiler and graphics dependencies, extracts the boot ELF, builds the runner, and starts the game. It needs an internet connection until the dependencies have been cached. For an offline first setup, place the upstream dependency archives under `downloads` inside the setup directory. Use the filenames in [WindowsPreviewSources.psd1](../scripts/WindowsPreviewSources.psd1). The upstream setup verifies these archives against its pinned checksums.
 
-For an offline first launch with the published `0.1.0-preview.2` executable, choose a setup directory without square brackets. The `0.1.0-preview.3` candidate passed the [offline setup test with brackets](#offline-setup-in-paths-with-brackets).
+For an offline first launch with the older `0.1.0-preview.2` executable, choose a setup directory without square brackets. Release `0.1.0-preview.3` passed the [offline setup test with brackets](#offline-setup-in-paths-with-brackets).
 
 After setup, the same command runs the local build. Use `--direct` to require an existing build, or `--setup-only` to prepare the build without starting the game. `--help` lists all switches. For example, this command stores game data and build files in separate directories and starts fullscreen.
 
@@ -58,6 +58,14 @@ Connect the controller before launching. Use a fresh data directory to test prof
 Finish an event, wait for autosave, and close the game. Use `--direct --fullscreen` with the same data and setup directories to confirm that the profile and progress load. The data directory contains `logs/ps2run_*.log`. With `PS2_PAD_LOG=1`, the log records the controller name and input transitions for the guest ports. This run provides physical input and driver coverage on the existing installation. The clean desktop release test uses the full combination in a fresh installation.
 
 ## Verification
+
+### Windows preview 3 release
+
+The release executable SHA-256 is `0c238cd6f525f8ea5546b289f84b4382b8d04ebdc211d8f500fea9798ed20023`. In an offline Windows 11 Sandbox on build `26100.9606`, it prepared a fresh backend from the reference ISO and verified dependency archives. The launcher, setup, and player paths contained both spaces and square brackets. The initial software-rendered run reached frame 780 and a separate direct launch reached frame 540 with the same runner hash. Invalid disc input and a direct launch before setup returned the expected errors.
+
+The exact release reopened a copy of the previous preview's Sprintcar profile and settings through the supplied controller input. It reached frame 3120 with 341 memory-card page reads and zero writes. The save, settings, and prepared runner hashes matched their initial values. A separate direct launch enabled both the Road America and DTM mods, reached frame 150, and selected `road-america-dtm.ps2`. The evidence is under `local/release-preview-3/sandbox-evidence/`. The full desktop test with physical input and hardware rendering remains open.
+
+### Earlier verification
 
 A clean offline Windows 11 Sandbox on build `26100.9606` started with the verified dependency archives and no prepared build. No compiler, CMake, Ninja, or Git was on the guest's initial `PATH`. The package ran from `C:\`, with separate setup and data paths containing spaces and brackets. It validated the ISO, compiled 224 build units, and ran the first 780 guest frames in 3 minutes and 44 seconds. The setup used 1.98 GiB, including the preseeded archives. The ISO stayed mounted read-only and setup created no duplicate image.
 

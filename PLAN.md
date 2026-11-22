@@ -8,6 +8,12 @@ The first native milestone is to build the North American `SLUS-21182` revision 
 
 Use the [acceptance checklist](docs/acceptance-checklist.md) to track end-to-end play, full-game compatibility, and release verification for each platform.
 
+## Release and workspace maintenance
+
+Prepare a new Windows preview for significant player-facing changes. The release checks cover first setup, direct reuse, and loading a copy of an existing save with the exact executable. Record its checksum, verified scope, and open acceptance items. Attach one `TocaRecomp.exe` to the release.
+
+Review local disk use while preparing a release. Measure storage reclaimed on the volume and account for hard links. Keep original discs, BIOS files, profiles, pinned dependency archives, and the evidence needed to reproduce results. Remove verified duplicate frames and rebuildable output from superseded builds. When compacting diagnostic checkpoints in place, compare their checksums before and after compression.
+
 ## Work items
 
 1. **Verify startup in PCSX2.** Boot `SLUS-21182` version `1.02` from the local disc copy, reach the main menu, and start a race. Record the disc revision and emulator settings so the test can be repeated.
@@ -21,6 +27,7 @@ Use the [acceptance checklist](docs/acceptance-checklist.md) to track end-to-end
 
 ## Verification status
 
+- Prepared Windows `0.1.0-preview.3` as one portable executable. The exact artifact passed clean offline setup, direct reuse, a previous-preview save reload, and a Road America and DTM combined boot in Windows Sandbox. [Release verification](docs/windows-preview.md#windows-preview-3-release)
 - Exported and reimported the position streams of the PS2 DTM meshes. The Windows launcher loaded a visibly rescaled high-detail Mercedes and a separate edit to the class-package mesh. [DTM verification](docs/ps2-dtm-models.md#windows-verification)
 - Opened a pull request upstream to fix the PSP-to-PC converter's input and output argument handling, repair its build file, and report the current conversion status to callers. [RD3_BD7sTools PR #1](https://github.com/BuilderDemo7/RD3_BD7sTools/pull/1)
 - Saved a 2:47.56 Road America Time Trial lap and restored it in the ghost list on cold boot. The original Dirt Raceway 1 ghost remained present. [Road America add-on](docs/ps2-disc-and-archives.md#play-road-america-from-your-own-discs)
