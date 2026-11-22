@@ -2,9 +2,9 @@
 
 The launcher packages the first-run setup for Windows 11 x64. Supply your own North American PS2 disc, `SLUS-21182` v1.02, as an ISO, a matching DVD CHD, or a directory of extracted disc files. Keep the disc available at launch. The launcher builds the runner locally and reads the original disc in place. The package includes the launcher, setup scripts, patches, and pinned upstream source archives.
 
-The first limited public preview was published on November 22, 2026. Clean installation was verified in Windows Sandbox with software graphics. Full races on Direct3D 12 used recorded inputs on an existing Windows installation. [Windows x64 preview download](https://github.com/PipeKnight/toca-race-driver-3/releases/tag/v0.1.0-preview.1)
+The current Windows release, `v0.1.0-preview.2`, ships as a single portable `TocaRecomp.exe`. It loads the previous preview's saves and settings. Clean installation was verified in Windows Sandbox with software graphics. Full races on Direct3D 12 used an existing Windows installation. [Windows x64 release](https://github.com/PipeKnight/toca-race-driver-3/releases/tag/v0.1.0-preview.2)
 
-For the published `0.1.0-preview.1` download, extract the archive and keep its `support` directory next to `TocaRecomp.exe`. The `0.1.0-preview.2` executable bundles those files and can be copied on its own.
+The earlier `0.1.0-preview.1` archive requires its `support` directory next to `TocaRecomp.exe`. [Previous Windows release](https://github.com/PipeKnight/toca-race-driver-3/releases/tag/v0.1.0-preview.1)
 
 ## Build the package
 
@@ -27,6 +27,8 @@ From the package directory, run the launcher with the path to your disc.
 The first launch fetches and verifies the portable compiler and graphics dependencies, extracts the boot ELF, builds the runner, and starts the game. It needs an internet connection until the dependencies have been cached. For an offline first setup, place the upstream dependency archives under `downloads` inside the setup directory. Use the filenames in [WindowsPreviewSources.psd1](../scripts/WindowsPreviewSources.psd1). The upstream setup verifies these archives against its pinned checksums.
 
 Use a setup directory without square brackets for an offline first launch. The bundled checksum tool could not open a dependency archive under a setup path containing brackets. The verified configuration used a separate data directory with brackets and a setup directory with spaces.
+
+A local probe reproduced the failure with both BusyBox `sha256sum` and CMake. For the directory containing brackets, both native programs received the `/c/...` path from MinGit and reported it missing. Bash could read the same file and compute its hash through standard input. Both native tools succeeded when given an explicit Windows path with a drive letter. The full offline build still needs that conversion at the affected tool calls.
 
 After setup, the same command runs the local build. Use `--direct` to require an existing build, or `--setup-only` to prepare the build without starting the game. `--help` lists all switches. For example, this command stores game data and build files in separate directories and starts fullscreen.
 
@@ -114,3 +116,11 @@ The Windows x64 `0.1.0-preview.2` candidate contains one `TocaRecomp.exe`. Its S
 The standalone candidate launched from a folder holding a copy of an existing `0.1.0-preview.1` memory card and `keys.ini`. It reused the previous prepared setup and ran on the RTX 4070 through Direct3D 12. World Sprintcar Series standings showed **Player One** in first place with **150 points**. The runner reported 341 card reads and zero writes on normal window close. The original card, test copy, and settings retained their hashes. The card passed the filesystem and ECC check. A separate direct launch from a different working directory opened the same data through an explicit `--data-dir` and showed **Dirt Raceway 2 · Sunny** as the next session. Host migration logs are under `local/executable-preview-qa/`.
 
 A clean offline Windows 11 Sandbox on build `26100.9606` copied only the executable and reused verified dependency downloads. Its first launch built the runtime and reached 780 guest frames in 3 minutes and 44 seconds. A direct no-save launch reached 540 frames with the same runner hash. The executable folder still contained only `TocaRecomp.exe`. The unsupported short ISO returned exit code `2` and created no backend or memory card. `--direct` before setup returned exit code `3` and created neither setup nor data. These checks used software graphics and provide clean installation coverage. See `local/executable-preview-qa/guest-plain/` for the guest report and logs.
+
+### Verify an in-place update and reinstall
+
+The public GitHub download matched the single-executable candidate's SHA-256. The test launched `0.1.0-preview.1` from its published archive with a copied memory card, then replaced `TocaRecomp.exe` in that same directory with the downloaded `0.1.0-preview.2` file. The new executable used its bundled support, and the old support files retained their hashes. After the test moved the old application directory aside, a fresh copy of the executable launched with the retained data in a separate `--data-dir` and the existing prepared setup.
+
+The old version, in-place update, and reinstall each reached frame 3120 with 341 card reads and zero card writes. The memory card, `keys.ini`, and prepared runner retained their SHA-256 hashes. These checks used software graphics and scripted controller input. See `local/executable-preview-qa/public-upgrade/` for the local evidence.
+
+A replay of the input recorded during the in-place update showed **Load Successful** and **Dirt Raceway 2 · Sunny**. The first differing checkpoint was frame 2970 in both the headless and windowed diagnostics. Continuing the windowed replay reached frame 3120 with zero card writes and preserved the card hash. The restored menu and card checks passed. Exact replay parity at that transition remains open.
