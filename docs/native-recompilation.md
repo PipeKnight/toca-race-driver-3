@@ -195,6 +195,10 @@ The SDL controller harness initially read the guest ports before the frame bound
 
 The test restored a profile from the automatic backup created when Time Trial saved a ghost slot. The recovered card loaded on a cold boot and showed the World Sprintcar Series cup. Player One recorded a `0:30.87` lap on National Dirt Raceway Stage 2, ended the session, and the game saved the ghost. A fresh launch restored the profile and reported a successful load after selecting the player ghost. In local Multiplayer, the second virtual guest pad joined and accelerated its own car in the lower split-screen view. The upper view continued responding to the first pad.
 
+#### Verify a local multiplayer reconnect
+
+The exact Windows preview candidate entered a one-lap World Sprintcar Series race on National Dirt Raceway Stage 1 with two local players. Both views showed the rolling start and the race clock. A second run loaded a mid-race checkpoint and connected two SDL virtual controllers. The game displayed its port 2 reconnect prompt when the second controller was removed. Reattaching it cleared the prompt. Player 1 selected Continue, the race clock advanced in both views, and the runner logged new input on port 2 while the lower car moved. The candidate exited normally and preserved the copied card's SHA-256. This check covers disconnect and resume. The split-screen finish and physical controller checks remain open. Logs and frames are under `local/multiplayer-qa/preview-grid/` and `local/multiplayer-qa/preview-resume/`.
+
 #### Windows Sandbox verification
 
 A fresh Windows 11 Sandbox on build `26100.9606` used the prepared runner, its DLLs and caches, and the PowerShell launcher. The package and original ISO were mapped read-only. The guest copied the package to a writable local directory and shared only the test evidence folder with write access. Networking was disabled. Both live translators reported that no C++ compiler was available. [Windows Sandbox configuration](https://learn.microsoft.com/en-us/windows/security/application-security/application-isolation/windows-sandbox/windows-sandbox-configure-using-wsb-file)

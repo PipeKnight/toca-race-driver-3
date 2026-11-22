@@ -73,6 +73,18 @@ The corrected candidate archive has SHA-256 `ff8ed1d713c637608ce5c8fbae446ffe84f
 
 The runner built from that archive on the current Windows host completed the scripted Silverstone National Clio Cup round through Direct3D 12 on the RTX 4070. It matched all 652 replay checkpoints and reached tied second overall with 28 points. The autosave matched the original reference card and passed filesystem and ECC checks. A cold launch restored both Tier 2 offers and preserved the card SHA-256. Across frames 4000–10500 the race averaged 59.38 fps with a 17.54 ms 95th-percentile interval. It had 19 WASAPI queue underruns and zero dropped samples. The log reported 18 of the underruns by frame 3012 during initial live compilation. The two known guest stream-buffer warnings remained.
 
+#### Silverstone audio retest
+
+The same runner repeated frames 2910–12700 using the same grid checkpoint, recorded input, and card copies in normal windowed Direct3D 12 mode. No Sandbox build was running. One pass started with empty live compilation caches. The other reused the first pass's EE and VU1 caches. Both matched all 652 replay checkpoints, preserved the grid cards, and averaged 60.00 fps at frames 4000–10500 with a 16.71 ms 95th-percentile frame interval.
+
+The cold-cache pass logged zero WASAPI queue underruns. The warm-cache pass logged one at frame 11247, which took 334.94 ms and produced about 0.22 seconds of output silence. Neither pass dropped samples. Both chip captures contained 7,832,000 identical stereo sample frames at 48 kHz and recorded the slot 4 allocation and close warnings at frames 4766 and 5739. The PCM payload SHA-256 was `6984222c6dd3f8e7527966f29ef52f65caa174443705588c544a5e1a0c36dbef`. These runs locate the single output interruption separately from the repeatable guest warnings. The cause of the warm-cache stall and audio mix parity remain open. Traces and captures are under `local/release-preview-qa/isolated-audio/`.
+
+#### Portable player data and normal exit
+
+A fresh extraction of the candidate ZIP used an existing prepared setup and a separate portable directory containing copies of a completed Clio Cup card and `keys.ini`. `--setup-only` preserved both file hashes. Two launches from another working directory reused the setup with `--direct`, first in windowed mode and then fullscreen. Each used the RTX 4070 through Direct3D 12, took SDL virtual controller input, and performed 341 page reads without writing the memory card. Both runs closed through the normal Windows close request and the launcher returned exit code zero. The card and settings hashes stayed unchanged, and neither run logged a WASAPI underrun or a dropped sample. See `local/release-preview-qa/launcher-lifecycle/`.
+
+#### Sandbox hardware attempt
+
 The Windows 11 vGPU guest reached its desktop and enumerated the RTX 4070, Intel UHD 770, and a Remote Desktop keyboard. The initial candidate built successfully from the original ISO. At startup the guest session stopped during graphics initialization, before the runner logged an active Direct3D 12 adapter or rendered a frame. A separate `D3D12CreateDevice` call for the default adapter in the guest's system session succeeded. A later guest prepared for the low-power FXC probe reached the system session without reaching interactive logon during the test. The physical controller test still requires an accessible device on an interactive clean Windows installation.
 
 Candidate evidence is under `local/release-preview-qa/`.
