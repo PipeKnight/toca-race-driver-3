@@ -207,6 +207,10 @@ A scan found sector-aligned `BIGF` packages containing PS2 DMA geometry and `col
 | `a12` | 808,393 | `a12_trk.dma` | 10,826 | 16,642 |
 | `a13` | 811,291 | `a13_trk.dma` | 12,906 | 18,704 |
 
+The `.aid` files identify two distinct layouts. `a12.aid` has 114 primary route points and a 2,303.28 m lap. `a11.aid` and `a13.aid` each have 306 primary route points and a 4,292.80 m lap. The latter two have byte-identical primary lane coordinates and collision data. Their event records and some scenery members differ. The lengths map `a12` to A1-Ring Short and `a11`/`a13` to two donor packages for A1-Ring GP. The first GP conversion can use `a11` with its corresponding route and scene from the same package family.
+
+The Road America scene-node converter processed all 14 DMA members from each selected A1-Ring package. The compressed, aligned member payloads total 2,873,344 bytes and 1,103 converted nodes for GP, and 2,693,312 bytes and 973 nodes for Short. Both payloads fit in the reference 3,590,336-byte archive after allowing for the JPAK header. Both donor routes have a 79-point pit route. The auxiliary route has 36 points for GP and 28 for Short, matching the lap-boundary checkpoint spans. These checks cover conversion inputs and archive capacity. In-game loading remains open.
+
 The sampled collision members have valid bounds and triangle indices within their vertex arrays when parsed with the Race Driver 3 collision layout. The configuration keys for A1-Ring Short and GP still need to be mapped to their display names. The read-only inventory and member-offset report are in `race-driver-2-packages.json` and `race-driver-2-track-formats.json` under `local/qa-circuit-drive/`.
 
 ### Road America import probes
@@ -243,4 +247,29 @@ python scripts/BuildTrackGeometryOverlay.py "<extracted RD3 disc>" "F:/" "local/
 
 The tool reads both discs and creates a local `DMA1.JPK` overlay within the original 3,590,336-byte archive extent. A slot-scoped diagnostic runner using this output loaded the imported course and the original Oschersleben in separate Free Race runs. The archive trace activated the two overlays when the loader requested `TQA1` and left them inactive for `OSC1`.
 
-On Windows 11 with Direct3D 12, the corrected run rendered the pit straight, road surfaces, scenery, and sky in captures around the full lap. **Race Results** classified **Player One (P1)** **20th of 20** at **3:06.68** without a penalty. The finish wrote an autosave to the isolated test card. Replaying the recorded input matched all 793 checkpoints through the finish. A separate CPU-renderer check showed the same restored start straight. Evidence is under `local/qa-circuit-drive/`, including `roa-bounded-lap/frames/frame_19200.png`, `roa-bounded-result/frames/frame_20298.png`, and `roa-bounded-cpu/frames/frame_07800.png`. Independent record storage and normal launcher integration remain open.
+On Windows 11 with Direct3D 12, the corrected run rendered the pit straight, road surfaces, scenery, and sky in captures around the full lap. **Race Results** classified **Player One (P1)** **20th of 20** at **3:06.68** without a penalty. The finish wrote an autosave to the isolated test card. Replaying the recorded input matched all 793 checkpoints through the finish. A separate CPU-renderer check showed the same restored start straight. Evidence is under `local/qa-circuit-drive/`, including `roa-bounded-lap/frames/frame_19200.png`, `roa-bounded-result/frames/frame_20298.png`, and `roa-bounded-cpu/frames/frame_07800.png`.
+
+### Play Road America from your own discs
+
+Build `TocaRecomp.exe` from this checkout using the [Windows package instructions](windows-preview.md#build-the-package). The add-on flag is available in builds that use the Road America patch. Prepare the add-on with Python 3 and these disc directories:
+
+- TOCA Race Driver 3 `SLUS-21182` v1.02, extracted to a directory containing `RDH.DIR` and `RDH_1.HUG`.
+- Race Driver 2 `SLES-52638` v1.02, mounted or extracted to a directory containing `RD2.DIR` and `RD2_1.HUG`.
+
+```powershell
+python scripts/BuildRoadAmericaMod.py 'D:\Discs\RD3' 'F:\' 'D:\Mods\Road America'
+```
+
+Choose a new folder under an existing parent for the output. The builder reads both discs in place and writes four local overlays. Keep those generated files private. The resulting add-on directory is the path to pass to the launcher each time you want to enable it.
+
+```powershell
+.\TocaRecomp.exe --disc 'D:\Discs\TOCA Race Driver 3.iso' --road-america 'D:\Mods\Road America'
+```
+
+In **Free Race**, select **Autosport Clio Cup** and then **Road America**. Use **Sunny** for the experimental track. The add-on uses its own `road-america.ps2` under the launcher's data directory. Start the launcher without `--road-america` to use `toca-slus-21182.ps2` for the stock game. The imported track has its own catalog entry, `tqa1`, and uses record index 19, which is free among the 80 stock entries. Oschersleben is also selectable in the add-on's Clio Cup calendar.
+
+The import has a 6.057 km lap, converted collision and AI route data, and the rebuilt donor scene. Some companion resources still come from Oschersleben. Additional weather and the in-game record table need separate verification.
+
+The Windows 11 x64 candidate prepared a fresh backend from the portable executable and the original ISO. Two cold runs of that backend used the RTX 4070 through Direct3D 12. The first selected Road America, loaded both donor overlays, and drove off the grid. The second selected Oschersleben with the add-on still active, used the stock packages, and reached the original grid. Both courses also appeared under their own names in the track carousel. Separate `--direct` runs through `TocaRecomp.exe` selected `road-america.ps2` with the flag and `toca-slus-21182.ps2` without it. The stock test card's SHA-256 stayed unchanged. Local evidence is under `local/road-america-launch/`.
+
+A third Direct3D 12 run started from power-on with recorded input, selected Road America, and finished the one-lap race. Race Results showed Player One 20th in 3:06.68 without a penalty. Continuing through the finish triggered the autosave and wrote 772 pages to the isolated card. The resulting card passed filesystem and ECC checks. Another cold run loaded Player One from that card with 341 page reads and zero writes. The SHA-256 stayed unchanged. The autosave, result, and profile reload are captured in `finish/frames/frame_19550.png`, `finish/frames/frame_20297.png`, and `profile-reload/frames/frame_01840.png` under the local evidence directory.

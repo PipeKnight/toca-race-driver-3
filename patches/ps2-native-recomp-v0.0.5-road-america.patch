@@ -1,0 +1,255 @@
+--- a/recomp/codegen.cpp
++++ b/recomp/codegen.cpp
+@@ -214,7 +214,12 @@
+         label_after_slots();
+ 
+         out_.str({});
+-        out_ << "#include \"units.hpp\"\n\nnamespace gen {\n\nusing namespace ps2;\n\n";
++        const bool track_hooks = !relocatable_ && !options_.live_stamp &&
++            ((base_ <= 0x002568E4u && 0x002568E4u < end) ||
++             (base_ <= 0x00389084u && 0x00388F98u < end));
++        out_ << "#include \"units.hpp\"\n";
++        if (track_hooks) out_ << "#include \"ps2/disc.hpp\"\n";
++        out_ << "\nnamespace gen {\n\nusing namespace ps2;\n\n";
+         out_ << "const std::uint16_t " << table_name(u) << "[" << (layout_.size() / 4) << "] = {";
+         std::vector<std::uint16_t> dense(layout_.size() / 4, 0);
+         for (const auto &[a, id] : ids_[u]) dense[(a - base_) >> 2] = id;
+@@ -246,6 +251,15 @@
+             }
+             if (options_.probes.count(a)) line(std::format("probe(c, {});", pc(a)));
+             const Insn i = at(a);
++            if (track_hooks) {
++                if (a == 0x002568E4u && i.word == 0x27a50080u)
++                    line("disc::road_america_path(c.r[29].w[0]);");
++                if (a == 0x00388F98u && i.word == 0x27bdffd0u)
++                    line("if (disc::road_america_enabled()) { set32(c.r[29], c.r[29].w[0] - 128u); "
++                         "set32(c.r[5], disc::road_america_member(c.r[5].w[0], c.r[29].w[0])); }");
++                if (a == 0x00389084u && i.word == 0x03e00008u && at(a + 4).word == 0x27bd0030u)
++                    line("if (disc::road_america_enabled()) set32(c.r[29], c.r[29].w[0] + 128u);");
++            }
+             const Flow fl = flow(i.op);
+             if (fl == Flow::None) {
+                 if (const auto t = options_.toggles.find(a); t != options_.toggles.end()) toggled(i, t->second);
+--- a/runtime/include/ps2/disc.hpp
++++ b/runtime/include/ps2/disc.hpp
+@@ -30,6 +30,11 @@
+ bool is_open();
+ bool read(std::uint32_t sector, std::uint32_t count, void *out);
+ bool ready(std::uint32_t sector, std::uint32_t count);
++// Resource lookup hooks for the supported TOCA Race Driver 3 disc.
++void set_road_america_directory(const std::string &folder);
++bool road_america_enabled();
++void road_america_path(std::uint32_t address);
++std::uint32_t road_america_member(std::uint32_t address, std::uint32_t scratch);
+ std::optional<Entry> find(const std::string &path);
+ std::uint32_t layer1_start();
+ std::uint64_t sector_count();
+--- a/runtime/src/disc.cpp
++++ b/runtime/src/disc.cpp
+@@ -1,5 +1,6 @@
+ #include "ps2/disc.hpp"
+ #include "ps2/hitch.hpp"
++#include "ps2/memory.hpp"
+ #include "ps2/os.hpp"
+ #include "load_stats.hpp"
+ #include "toca_dvd_directory.hpp"
+@@ -8,6 +9,8 @@
+ #endif
+ 
+ #include <algorithm>
++#include <array>
++#include <atomic>
+ #include <cctype>
+ #include <cstdio>
+ #include <cstring>
+@@ -36,6 +39,89 @@
+ std::string upper(std::string s) {
+     for (char &c : s) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+     return s;
++}
++
++struct RoadAmericaMember {
++    const char *name;
++    std::uint32_t sector;
++    std::size_t bytes;
++    const char *magic;
++    std::uint32_t entries;
++};
++
++constexpr std::array road_america_members{
++    RoadAmericaMember{"tracks.big", 80673, 0x4800, "BIGF", 81},
++    RoadAmericaMember{"events.big", 81008, 0x1fe800, "BIGF", 204},
++    RoadAmericaMember{"TRACK.JPK", 516992, 1378240, "JPAK", 44},
++    RoadAmericaMember{"DMA1.JPK", 519440, 3590336, "JPAK", 14},
++};
++
++struct RoadAmerica {
++    std::uint32_t archive_sector = 0;
++    std::array<std::vector<std::uint8_t>, road_america_members.size()> data;
++    std::atomic_uint track_members{0};
++};
++
++std::unique_ptr<RoadAmerica> g_road_america;
++std::string g_road_america_directory;
++
++bool prepare_road_america() {
++    const auto &folder = g_road_america_directory;
++    if (folder.empty()) return true;
++    const auto archive = find("RDH_1.HUG");
++    if (!find("SLUS_211.82") || !archive || archive->size != 1546352640u) {
++        std::fprintf(stderr, "[road-america] the add-on requires SLUS-21182 v1.02\n");
++        return false;
++    }
++    auto mod = std::make_unique<RoadAmerica>();
++    mod->archive_sector = archive->sector;
++    for (std::size_t i = 0; i < road_america_members.size(); ++i) {
++        const auto &member = road_america_members[i];
++        const auto filename = os::utf8(os::path(folder) / member.name);
++        std::FILE *file = os::open(filename, "rb");
++        if (!file) {
++            std::fprintf(stderr, "[road-america] could not open %s\n", filename.c_str());
++            return false;
++        }
++        auto &data = mod->data[i];
++        data.resize(member.bytes);
++        const auto size = std::fread(data.data(), 1, data.size(), file);
++        const bool complete = std::fgetc(file) == EOF && !std::ferror(file);
++        std::fclose(file);
++        if (size != data.size() || !complete || std::memcmp(data.data(), member.magic, 4) != 0 ||
++            u32(data.data() + (i < 2 ? 4 : 8)) != member.entries) {
++            std::fprintf(stderr, "[road-america] invalid add-on member %s\n", filename.c_str());
++            return false;
++        }
++    }
++    g_road_america = std::move(mod);
++    std::fprintf(stderr, "[road-america] enabled\n");
++    return true;
++}
++
++std::string_view guest_name(std::uint32_t address) {
++    if (address >= kRamSize) return {};
++    const auto *first = reinterpret_cast<const char *>(g_ram + address);
++    const auto *end = static_cast<const char *>(std::memchr(first, 0, std::min(128u, kRamSize - address)));
++    return end ? std::string_view(first, end - first) : std::string_view{};
++}
++
++void apply_road_america(std::uint32_t sector, void *out, std::size_t got) {
++    if (!g_road_america) return;
++    const auto &mod = *g_road_america;
++    const auto active = mod.track_members.load();
++    const std::uint64_t start = std::uint64_t{sector} * kSector;
++    for (std::size_t i = 0; i < road_america_members.size(); ++i) {
++        if (i >= 2 && !(active & (1u << (i - 2)))) continue;
++        const auto &data = mod.data[i];
++        const std::uint64_t offset = std::uint64_t{mod.archive_sector + road_america_members[i].sector} * kSector;
++        const auto first = std::max(start, offset);
++        const auto end = std::min(start + got, offset + data.size());
++        if (first >= end) continue;
++        std::memcpy(static_cast<std::uint8_t *>(out) + first - start, data.data() + first - offset, end - first);
++        if (i >= 2 && first == offset)
++            std::fprintf(stderr, "[road-america] loading %s for tqa1\n", road_america_members[i].name);
++    }
+ }
+ 
+ // The image is untrusted (a damaged rip, or a crafted file): a directory that cannot be right is left out with one line, never
+@@ -174,6 +260,7 @@
+ #endif
+ 
+ bool open(const std::string &name, std::uint64_t size, Reader reader, Probe probe) {
++    g_road_america.reset();
+     g_reader = std::move(reader);
+     g_probe = std::move(probe);
+     g_size = size;
+@@ -195,11 +282,46 @@
+     std::fprintf(stderr, "[disc] %s: %zu files, %llu sectors, layer 1 at %u\n", name.c_str(), g_index.size(),
+                  static_cast<unsigned long long>(g_size / kSector), g_layer1);
+     g_indexed = true;
++    if (!prepare_road_america()) return false;
+     if (!os::env("PS2_DISC_CHECK").empty()) self_check();
+     return true;
+ }
+ 
+ bool is_open() { return static_cast<bool>(g_reader); }
++
++void set_road_america_directory(const std::string &folder) { g_road_america_directory = folder; }
++bool road_america_enabled() { return g_road_america != nullptr; }
++
++void road_america_path(std::uint32_t address) {
++    if (!g_road_america) return;
++    const auto name = guest_name(address);
++    constexpr std::string_view imported = "TRACKS\\TQA1\\";
++    constexpr std::string_view stock = "TRACKS\\OSC1\\";
++    const bool selected = name.starts_with(imported);
++    if (selected || name.starts_with(stock)) {
++        const auto suffix = name.substr(imported.size());
++        const unsigned flag = suffix == "SUN\\TRACK.JPK" ? 1u : suffix == "SUN\\DMA1.JPK" ? 2u : 0u;
++        if (flag) {
++            if (selected) g_road_america->track_members.fetch_or(flag);
++            else g_road_america->track_members.fetch_and(~flag);
++        }
++        if (selected) std::memcpy(g_ram + address + 7, "OSC1", 4);
++        return;
++    }
++    // Loading-screen and other companion resources use the reference course.
++    if (const auto pos = name.find("TQA1"); pos != std::string_view::npos)
++        std::memcpy(g_ram + address + pos, "OSC1", 4);
++}
++
++std::uint32_t road_america_member(std::uint32_t address, std::uint32_t scratch) {
++    const auto name = guest_name(address);
++    if (!g_road_america || scratch > kRamSize - 128u) return address;
++    const auto pos = name.find("tqa1");
++    if (pos == std::string_view::npos) return address;
++    std::memmove(g_ram + scratch, name.data(), name.size() + 1);
++    std::memcpy(g_ram + scratch + pos, "osc1", 4);
++    return scratch;
++}
+ 
+ bool read(std::uint32_t sector, std::uint32_t count, void *out) {
+     if (!g_reader) return false;
+@@ -213,6 +335,7 @@
+         if (ms > hitch::threshold_ms() / 3) std::fprintf(stderr, "[hitch] disc read of %u sectors at sector %u (%.1f MB) took %.1f ms\n", count, sector, want / 1048576.0, ms);
+     }
+     if (got < want) std::memset(static_cast<std::uint8_t *>(out) + got, 0, want - got);
++    apply_road_america(sector, out, got);
+     // A game on a two-layer disc reads the second layer with the same sector numbers, which simply continue: the layer
+     // boundary is not a gap in the image. Say so once, and say it when a read comes back short (the rest is filled with
+     // zeros, which would otherwise go unnoticed). PS2_TRACE_DISC=1 prints every read in layer 1 and past the 4 GiB line.
+--- a/host/main.cpp
++++ b/host/main.cpp
+@@ -105,7 +105,8 @@
+                  "              [--trace-iop] [--trace-iop-hle] [--frames-dir dir] [--frame-every n] [--frame-at n]...\n"
+                  "              [--press frame:button[+button][:frames]]... [--window] [--fullscreen]\n"
+                  "              [--save-state frame:file] [--load-state file|newest] [--quick-dir dir] [--widescreen] [--patches file]\n"
+-                 "              [--record file] [--no-record] [--replay file [--replay-continue]] [--rtc seconds] [--game-dir dir]\n");
++                 "              [--record file] [--no-record] [--replay file [--replay-continue]] [--rtc seconds] [--game-dir dir]\n"
++                 "              [--road-america dir]\n");
+     return 2;
+ }
+ 
+@@ -841,7 +842,7 @@
+ #endif
+     std::vector<std::string> args{argv[1]};
+     [[maybe_unused]] bool window = false, fullscreen = false;
+-    std::string load_path, given_game_dir;
++    std::string load_path, given_game_dir, road_america_directory;
+     bool no_record = false;
+     ps2::g_options.disc_program = from_disc;
+     for (int i = 0; i < argc; ++i) {
+@@ -871,6 +872,7 @@
+         else if (a == "--trace-threads") ps2::g_options.trace_threads = true;
+         else if (a == "--disc" && i + 1 < argc) ps2::g_options.disc_path = argv[++i];
+         else if (a == "--game-dir" && i + 1 < argc) given_game_dir = argv[++i];
++        else if (a == "--road-america" && i + 1 < argc) road_america_directory = argv[++i];
+         else if (a == "--memcard" && i + 1 < argc) ps2::g_options.memcard_path = argv[++i];
+         else if (a == "--trace-iop") ps2::g_options.trace_iop_modules = true;
+         else if (a == "--trace-iop-hle") ps2::g_options.trace_iop_hle = true;
+@@ -912,6 +914,8 @@
+         std::unique(ps2::g_options.frame_capture_frames.begin(), ps2::g_options.frame_capture_frames.end()),
+         ps2::g_options.frame_capture_frames.end());
+ 
++    if (!road_america_directory.empty() && !from_disc) return usage();
++    ps2::disc::set_road_america_directory(road_america_directory);
+     std::string program_location = program;
+     if (from_disc) {
+         if (ps2::g_options.disc_path.empty()) return usage();

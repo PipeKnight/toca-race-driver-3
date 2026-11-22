@@ -8,6 +8,7 @@ param(
     [string]$PreparedDirectory,
     [string]$DataDirectory,
     [string]$CompilerPath,
+    [string]$RoadAmericaDirectory,
     [switch]$ValidateOnly,
     [switch]$Help
 )
@@ -21,6 +22,7 @@ The launcher checks the DVD data or extracted-file layout's SHA-256 before start
 DVD CHD requires a runner built with libchdr. -Iso remains an alias for -Disc.
 Use -PreparedDirectory to run a prepared copy containing ps2run.exe and its runtime files.
 Use -DataDirectory to choose where to keep saves and runtime files.
+Use -RoadAmericaDirectory to load a locally generated Road America add-on with its own memory card.
 The game uses its own portable memory card. Use -NoSave to run without a card.
 Set -FrameLimit to close automatically after a fixed number of guest frames.
 Set -ValidateOnly to check the disc without launching the runner.
@@ -72,8 +74,17 @@ if (!$ValidateOnly -or $isFolder -or $isChd) {
 
     $displayMode = if ($Fullscreen) { '--fullscreen' } else { '--window' }
     $runnerArgs = @('--disc', (Quote-RunnerPath $discPath), '--game-dir', (Quote-RunnerPath $gameDir), $displayMode)
+    if ($RoadAmericaDirectory) {
+        if (!(Test-Path -LiteralPath $RoadAmericaDirectory -PathType Container)) {
+            [Console]::Error.WriteLine('Pass a generated Road America add-on directory.')
+            exit 2
+        }
+        $addonPath = (Resolve-Path -LiteralPath $RoadAmericaDirectory).ProviderPath
+        $runnerArgs += @('--road-america', (Quote-RunnerPath $addonPath))
+    }
     if (!$NoSave) {
-        $memoryCard = Join-Path $gameDir 'toca-slus-21182.ps2'
+        $cardName = if ($RoadAmericaDirectory) { 'road-america.ps2' } else { 'toca-slus-21182.ps2' }
+        $memoryCard = Join-Path $gameDir $cardName
         $runnerArgs += @('--memcard', (Quote-RunnerPath $memoryCard))
     }
     if ($FrameLimit) {

@@ -3,6 +3,7 @@ param(
     [Parameter(Mandatory)][string]$Disc,
     [Parameter(Mandatory)][string]$DataDirectory,
     [Parameter(Mandatory)][string]$SetupDirectory,
+    [string]$RoadAmericaDirectory,
     [switch]$Direct,
     [switch]$SetupOnly,
     [switch]$Fullscreen,
@@ -227,5 +228,6 @@ try {
 }
 
 & $play -Disc $discPath -PreparedDirectory $runnerDirectory -DataDirectory $DataDirectory -CompilerPath $compiler `
-    -Fullscreen:$Fullscreen -NoSave:$NoSave -FrameLimit $FrameLimit -ValidateOnly:$SetupOnly
+    -RoadAmericaDirectory $RoadAmericaDirectory -Fullscreen:$Fullscreen -NoSave:$NoSave `
+    -FrameLimit $FrameLimit -ValidateOnly:$SetupOnly
 exit $LASTEXITCODE

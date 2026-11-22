@@ -64,6 +64,8 @@ The first release target is the North American PS2 disc `SLUS-21182` v1.02. Play
 - [x] Finish a race in an additional track slot using stock geometry, collision, and race data. QA Circuit finished an Autosport Clio Cup Free Race on Windows 11. [QA Circuit race](ps2-disc-and-archives.md#finish-a-race-in-qa-circuit)
 - [x] Finish a race with donor collision and converted route data. The Road America QA Circuit probe reached Race Results in 20th with a classified time of 3:25.21, including a 20-second penalty. [Road America import probes](ps2-disc-and-archives.md#road-america-import-probes)
 - [x] Verify Road America rendering around a full lap and confirm race completion with the corrected scene. The Windows 11 Direct3D 12 run finished in 3:06.68 without a penalty. [Road America geometry conversion](ps2-disc-and-archives.md#road-america-geometry-conversion)
+- [x] Build the Road America add-on locally from both discs and enable it through the portable Windows launcher. Reach the grid on Road America and stock Oschersleben with the same mod-enabled backend. Verify that the add-on and the stock launch select separate memory cards. [Road America add-on](ps2-disc-and-archives.md#play-road-america-from-your-own-discs)
+- [ ] Verify that a Road America lap record appears under the new track and survives a cold restart. Validate additional weather configurations.
 - [ ] Demonstrate a replaceable track and car from independently created assets. For additional slots, verify registration, selection, collisions, checkpoints, AI paths, and stable saves. Track RD3_BD7sTools collaboration in the project plan.
 
 Custom tracks and cars have their own acceptance criteria. The recompilation can reach its first release using the original disc content.

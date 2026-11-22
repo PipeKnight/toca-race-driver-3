@@ -1,6 +1,7 @@
 /.tools/
 /local/
 /build/
+__pycache__/
 *.gpr
 *.rep/
 *.[iI][sS][oO]

@@ -15,12 +15,13 @@ internal static class TocaRecomp
 
     private const string Usage =
         "Usage: TocaRecomp.exe --disc PATH [--data-dir PATH] [--setup-dir PATH]\n" +
-        "                     [--windowed | --fullscreen] [--direct | --setup-only]\n" +
+        "                     [--windowed | --fullscreen] [--direct | --setup-only] [--road-america PATH]\n" +
         "                     [--no-save] [--frame-limit COUNT]\n\n" +
         "Run TOCA Race Driver 3 for Windows 11 x64 using your PS2 disc (SLUS-21182 v1.02).\n" +
         "--disc PATH          ISO, DVD CHD, or folder containing the extracted disc files.\n" +
         "--data-dir PATH      Saves, settings, caches, and runtime logs. Defaults to the launcher folder.\n" +
         "--setup-dir PATH     Portable toolchain and build files. Defaults to setup under the data folder.\n" +
+        "--road-america PATH  Enable the locally built Road America add-on and use its own memory card.\n" +
         "--windowed          Open a window (default).\n" +
         "--fullscreen        Open fullscreen.\n" +
         "--direct            Launch an existing build without running setup.\n" +
@@ -74,6 +75,7 @@ internal static class TocaRecomp
         string disc = null;
         string data = AppDomain.CurrentDomain.BaseDirectory;
         string setup = null;
+        string roadAmerica = null;
         string display = null;
         bool direct = false;
         bool setupOnly = false;
@@ -87,6 +89,7 @@ internal static class TocaRecomp
                 case "--disc": disc = ReadPath(args, ref index); break;
                 case "--data-dir": data = ReadPath(args, ref index); break;
                 case "--setup-dir": setup = ReadPath(args, ref index); break;
+                case "--road-america": roadAmerica = ReadPath(args, ref index); break;
                 case "--windowed":
                 case "--fullscreen":
                     if (display != null && display != args[index])
@@ -112,6 +115,8 @@ internal static class TocaRecomp
             throw new ArgumentException("Disc source does not exist: " + disc);
         if (direct && !Directory.Exists(setup))
             throw new IOException("This build is not prepared. Run once without --direct to set up the game.");
+        if (roadAmerica != null && !Directory.Exists(roadAmerica))
+            throw new ArgumentException("Road America add-on directory does not exist: " + roadAmerica);
 
         string support = PrepareSupport(data);
         var command = new List<string> {
@@ -121,6 +126,11 @@ internal static class TocaRecomp
         if (direct) command.Add("-Direct");
         if (setupOnly) command.Add("-SetupOnly");
         if (noSave) command.Add("-NoSave");
+        if (roadAmerica != null)
+        {
+            command.Add("-RoadAmericaDirectory");
+            command.Add(roadAmerica);
+        }
         if (display == "--fullscreen") command.Add("-Fullscreen");
         if (frameLimit != 0)
         {
