@@ -22,6 +22,45 @@ def unit(x, z):
     return x / length, z / length
 
 
+def side(a, b, p):
+    return (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0])
+
+
+def closed_edges(points):
+    return list(zip(points, points[1:] + points[:1]))
+
+
+def edges_touch(a, b, c, d):
+    if any(max(a[i], b[i]) < min(c[i], d[i]) or max(c[i], d[i]) < min(a[i], b[i]) for i in (0, 1)):
+        return False
+    return side(a, b, c) * side(a, b, d) <= 0 and side(c, d, a) * side(c, d, b) <= 0
+
+
+def simple_loop(edges, label):
+    for i, (a, b) in enumerate(edges):
+        for c, d in edges[i + 2:-1 if i == 0 else None]:
+            if edges_touch(a, b, c, d):
+                raise ValueError(f"{label} intersects itself near station {i}")
+
+
+def validate_ribbon(left, right, label, *, closed):
+    count = len(left)
+    for i in range(count if closed else count - 1):
+        j = (i + 1) % count
+        # The generated OBJ uses one diagonal per segment. Both faces must retain the same winding.
+        if side(left[i], right[i], right[j]) <= 1e-6 or side(left[i], right[j], left[j]) <= 1e-6:
+            raise ValueError(f"{label} folds near station {i}; increase the bend radius or narrow the road")
+    if closed:
+        left_edges, right_edges = closed_edges(left), closed_edges(right)
+        simple_loop(left_edges, f"{label} left edge")
+        simple_loop(right_edges, f"{label} right edge")
+        for i, (a, b) in enumerate(left_edges):
+            if any(edges_touch(a, b, c, d) for c, d in right_edges):
+                raise ValueError(f"{label} edges cross near station {i}; separate nearby parts of the circuit")
+    else:
+        simple_loop(closed_edges(left + right[::-1]), label)
+
+
 class Circuit:
     def __init__(self, layout):
         self.name = layout["name"]
@@ -94,16 +133,15 @@ class Circuit:
             dx, dz = self.direction(distance)
             if dx * start_dx + dz * start_dz < 0.965:
                 raise ValueError("Leave at least 90 m of nearly straight road on each side of start/finish")
-        samples = [self.position(d) for d in self.stations]
-        edges = list(zip(samples, samples[1:] + samples[:1]))
-
-        def side(a, b, q):
-            return (b[0] - a[0]) * (q[1] - a[1]) - (b[1] - a[1]) * (q[0] - a[0])
-
-        for i, (a, b) in enumerate(edges):
-            for c, d in edges[i + 2:-1 if i == 0 else None]:
-                if (side(a, b, c) * side(a, b, d) < 0 and side(c, d, a) * side(c, d, b) < 0):
-                    raise ValueError("The centerline intersects itself")
+        simple_loop(closed_edges([self.position(d) for d in self.stations]), "The centerline")
+        half = self.width / 2
+        left = [self.offset(d, -half) for d in self.stations]
+        right = [self.offset(d, half) for d in self.stations]
+        validate_ribbon(left, right, "The racing surface", closed=True)
+        pit_stations = range(-85, 86, 5)
+        left = [self.offset(d, pit_offset(d, self.width) - 3.4) for d in pit_stations]
+        right = [self.offset(d, pit_offset(d, self.width) + 3.4) for d in pit_stations]
+        validate_ribbon(left, right, "The pit lane", closed=False)
 
 
 def pit_offset(distance, width):

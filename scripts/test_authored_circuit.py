@@ -6,7 +6,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from BuildAuthoredCircuit import Circuit, build_route, preview
+from BuildAuthoredCircuit import Circuit, build_route, edges_touch, preview, validate_ribbon
 from BuildRoadAmericaMod import repack_bigf
 from ImportRd2Car import variants
 from Ps2TrackCollision import read_triangles
@@ -56,6 +56,18 @@ class AuthoredCircuitTests(unittest.TestCase):
         nodes = layout["centerline"]
         with self.assertRaisesRegex(ValueError, "Coincident"):
             Circuit(dict(layout, centerline=nodes + nodes[:1]))
+
+    def test_rejects_overlapping_road_edges_even_with_a_valid_centerline(self):
+        layout = self.layout()
+        with self.assertRaisesRegex(ValueError, r"racing surface.*intersects itself near station"):
+            Circuit(dict(layout, road_width_m=24))
+
+    def test_rejects_a_folded_strip_and_counts_collinear_overlap(self):
+        a, b, c, d = (0, 0), (3, 0), (2, 0), (5, 0)
+        self.assertTrue(edges_touch(a, b, c, d))
+        self.assertFalse(edges_touch(a, b, (4, 0), d))
+        with self.assertRaisesRegex(ValueError, "pit lane folds near station 0"):
+            validate_ribbon([(0, 1), (1, -1)], [(0, -1), (1, 1)], "The pit lane", closed=False)
 
     def test_car_catalog_reads_variants_without_assuming_the_model_name(self):
         original = bytes(512)
