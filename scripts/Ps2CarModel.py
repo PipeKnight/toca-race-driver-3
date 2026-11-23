@@ -2,6 +2,7 @@
 """Inspect PS2 DTM model pairs and edit the vertex streams of their meshes."""
 
 import argparse
+from bisect import bisect_left
 from collections import Counter
 import csv
 from dataclasses import dataclass
@@ -91,28 +92,84 @@ def mesh_packets(data):
     return base, streams
 
 
-def model_info(args):
-    data = args.model.read_bytes()
+def model_sections(data):
     payload, base, rows = relocation_table(data)
     if payload < 0x38 or set(rows.values()) != {0, 3, 4}:
         raise ValueError("Expected a PS2 DTM model relocation table")
     starts = [address - base for address in struct.unpack_from("<5I", data)]
     if starts != sorted(set(starts)) or any(not 0x38 <= offset < payload for offset in starts):
         raise ValueError("Invalid DTM model section offsets")
+    sections = list(zip(starts, starts[1:] + [payload]))
+    if any(end - start < 0x38 for start, end in sections):
+        raise ValueError("Truncated DTM model detail-level header")
+    return payload, base, rows, sections
+
+
+def lod_packet_ranges(model, sections, reference, mesh_size, packets):
+    offsets = [packet.position for packet in packets]
+    ranges = []
+    previous_end = 0
+    for start, end in sections:
+        first = previous_end
+        # The model submits contiguous mesh blocks through aligned DMA REF tags.
+        for tag_offset in range((start + 15) & ~15, end - 15, 16):
+            control, pointer = struct.unpack_from("<2I", model, tag_offset)
+            if control >> 16 != 0x3000 or not reference <= pointer < reference + mesh_size:
+                continue
+            offset = pointer - reference
+            length = (control & 0xffff) * 16
+            if offset != previous_end or not length or offset + length > mesh_size:
+                raise ValueError("The model's DMA references do not form contiguous mesh blocks")
+            previous_end += length
+        first_packet = bisect_left(offsets, first)
+        next_packet = bisect_left(offsets, previous_end)
+        if first_packet == next_packet:
+            raise ValueError("No mesh packets found for a DTM model detail level")
+        ranges.append(range(first_packet, next_packet))
+    if previous_end != mesh_size:
+        raise ValueError("The model's detail levels do not cover the mesh payload")
+    return ranges
+
+
+def lod_part_counts(model, sections, base):
+    counts = {}
+    for lod, (start, end) in enumerate(sections):
+        first, last = (address - base for address in struct.unpack_from("<2I", model, start + 0x24))
+        count = read_word(model, start + 0x30)
+        if not start + 0x38 <= first < last <= end or last - first != count * 0x30:
+            raise ValueError(f"Invalid model part table for LOD {lod}")
+        counts[lod] = count
+    return counts
+
+
+def model_info(args):
+    data = args.model.read_bytes()
+    payload, base, rows, sections = model_sections(data)
+    starts = [start for start, _ in sections]
     hi_reference, mesh_reference = struct.unpack_from("<2I", data, 0x30)
-    mesh_base, streams = mesh_packets(args.mesh.read_bytes())
+    mesh = args.mesh.read_bytes()
+    mesh_base, streams = mesh_packets(mesh)
     if mesh_base != mesh_reference:
         raise ValueError("The mesh base does not match the model's mesh reference")
+    ranges = lod_packet_ranges(data, sections[1:], mesh_reference, relocation_table(mesh)[0], streams)
     info = dict(model_base=f"{base:#010x}", model_payload_bytes=payload, model_section_offsets=starts,
                 model_relocation_kinds=dict(sorted(Counter(rows.values()).items())),
                 mesh_base=f"{mesh_reference:#010x}", mesh_packets=len(streams),
                 mesh_positions=sum(packet.count for packet in streams), hi_mesh_reference=f"{hi_reference:#010x}")
     if args.hi_mesh:
-        hi_base, hi_streams = mesh_packets(args.hi_mesh.read_bytes())
+        hi_mesh = args.hi_mesh.read_bytes()
+        hi_base, hi_streams = mesh_packets(hi_mesh)
         if hi_base != hi_reference:
             raise ValueError("The high-detail mesh base does not match the model's high-detail reference")
         info["hi_mesh_packets"] = len(hi_streams)
         info["hi_mesh_positions"] = sum(packet.count for packet in hi_streams)
+        ranges = lod_packet_ranges(data, sections[:1], hi_reference, relocation_table(hi_mesh)[0], hi_streams) + ranges
+    info["lod_packet_ranges"] = {}
+    info["lod_part_counts"] = lod_part_counts(data, sections, base)
+    for lod, packets in enumerate(ranges, start=0 if args.hi_mesh else 1):
+        if len(packets) != read_word(data, starts[lod] + 0x34):
+            raise ValueError(f"The traced packets do not match the model's LOD {lod} packet count")
+        info["lod_packet_ranges"][lod] = {"first_packet": packets.start, "packet_count": len(packets)}
     print(json.dumps(info, indent=2))
 
 
@@ -153,12 +210,26 @@ def mesh_import(args):
 
 def mesh_preview(args):
     data = args.mesh.read_bytes()
-    _, packets = mesh_packets(data)
-    if not all(packet.triangle_strip for packet in packets):
+    base, packets = mesh_packets(data)
+    indices = range(len(packets))
+    if (args.model is None) != (args.lod is None):
+        raise ValueError("Supply both --model and --lod to preview one detail level")
+    if args.model is not None:
+        model = args.model.read_bytes()
+        _, _, _, sections = model_sections(model)
+        high, standard = struct.unpack_from("<2I", model, 0x30)
+        reference = high if args.lod == 0 else standard
+        if base != reference:
+            raise ValueError(f"The mesh base does not match the model's LOD {args.lod} reference")
+        detail_sections = sections[:1] if args.lod == 0 else sections[1:]
+        ranges = lod_packet_ranges(model, detail_sections, reference, relocation_table(data)[0], packets)
+        indices = ranges[max(0, args.lod - 1)]
+    if not all(packets[index].triangle_strip for index in indices):
         raise ValueError("An input packet lacks a supported triangle-strip GIF template")
     output = ["# PS2 DTM strip preview in local mesh coordinates.\n"]
     first = 1
-    for index, packet in enumerate(packets):
+    for index in indices:
+        packet = packets[index]
         points = list(VERTEX.iter_unpack(data[packet.position:packet.position + packet.count * VERTEX.size]))
         output.append(f"g packet_{index}\n")
         for label, values in (("v", points),
@@ -292,6 +363,8 @@ def main():
     preview = commands.add_parser("mesh-preview", help="export verified triangle-strip streams as an OBJ preview")
     preview.add_argument("mesh", type=Path)
     preview.add_argument("output", type=Path)
+    preview.add_argument("--model", type=Path, help="matching .mdl for a single detail level")
+    preview.add_argument("--lod", type=int, choices=range(5), help="0 for high detail, or 1 to 4 for class mesh detail")
     preview.set_defaults(run=mesh_preview)
     replace = commands.add_parser("mesh-replace", help="replace selected car mesh packets with triangulated OBJ geometry")
     replace.add_argument("mesh", type=Path, help="template mesh providing the packet capacities and materials")

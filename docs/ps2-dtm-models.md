@@ -31,6 +31,37 @@ python scripts/Ps2CarModel.py model-info "$work\mercedes.mdl" "$work\mercedes.ms
 | Vectra class mesh | 1,170 | 6,451 |
 | Mercedes C-Class high-detail mesh | 1,054 | 6,740 |
 
+## Find packets by detail level
+
+`model-info` reports each detail level's first packet and packet count. The `.mdl` has five sections. The first references LOD 0 in the high-detail mesh, and the remaining sections reference LODs 1–4 in the class mesh. Aligned DMA REF tags give the byte ranges of the mesh blocks used by each section. The tool checks that these ranges cover the corresponding mesh payload in order and that the packet counts agree with the model headers. It reports the LOD 0 packet range when given `--hi-mesh`.
+
+| Mercedes detail level | Mesh | Packet indices | Roof packets |
+| --- | --- | --- | --- |
+| 0 | `DTM_C_KLASSE_HI.MSH` | 0–1053 | 135, 136 |
+| 1 | `DTM_C_Klasse.msh` | 0–576 | 56, 57 |
+| 2 | `DTM_C_Klasse.msh` | 577–879 | 606, 607 |
+| 3 | `DTM_C_Klasse.msh` | 880–1034 | 904, 905 |
+| 4 | `DTM_C_Klasse.msh` | 1035–1098 | 1065 |
+
+Give `mesh-preview` the matching `.mdl` and a detail level to export only that level. Group names retain the packet numbers from the full mesh, so the exported OBJ can serve as a reference for `mesh-replace` without renumbering. The packet table above applies to the reference Mercedes. Run `model-info` again for another car.
+
+```powershell
+python scripts/Ps2CarModel.py mesh-preview "$work\mercedes.msh" "$work\mercedes-lod2.obj" --model "$work\mercedes.mdl" --lod 2
+python scripts/Ps2CarModel.py mesh-preview "$work\mercedes-hi.msh" "$work\mercedes-lod0.obj" --model "$work\mercedes.mdl" --lod 0
+```
+
+### Match a variant's part map to its model
+
+Compare the `lod_part_counts` in `model-info` with the matching variant's `part.map`. The `.mdl` words at section offsets `0x24` and `0x28` reference the beginning and end of a table with `0x30` bytes per part. The word at `0x30` gives the record count. Each stock DTM map row lists every model part index from zero to the count minus one, once each. `0xffffffff` marks slots with no part at that detail level. This describes the index range and leaves the function of individual slots open.
+
+| Model | Part counts for LODs 0–4 | Matching DTM variant packages |
+| --- | --- | --- |
+| `DTM_A4.mdl` | 80, 76, 54, 43, 3 | `dtmx_00.big`–`dtmx_07.big` |
+| `DTM_C_Klasse.mdl` | 83, 80, 57, 45, 3 | `dtmx_08.big`–`dtmx_15.big`, plus `dtmx_12b.big` and `dtmx_13b.big` |
+| `DTM_Vectra.mdl` | 80, 77, 54, 43, 3 | `dtmx_16.big`–`dtmx_19.big` |
+
+All 22 maps in the reference `DTMX.JPK` matched the corresponding model counts. [Part map export workflow](modding.md#inspect-a-car-part-map)
+
 ## Edit a mesh while retaining its layout
 
 Export the positions to CSV, edit the `x`, `y`, and `z` columns, then import the result into a new copy of the same mesh. Keep the header, packet indices, vertex indices, and row order. Test an unedited export and import first. The two mesh hashes should match. A uniform scale is a useful first experiment because the stored normals retain the same directions.
@@ -81,3 +112,11 @@ A combined Direct3D 12 run reached the Road America Clio Cup race with the DTM o
 Replaced high-detail Mercedes packets 135 and 136 with an original two-sided, 16-triangle roof intake. The new triangles used 10 strip vertices per side within the template capacities of 12 and 11. All six replacement position, normal, and UV streams matched EE RAM. The 369,788-byte mesh differed from the template in 570 attribute bytes. The matched Windows Direct3D 12 captures at frame 3700 differed by 566 pixels within a 39 × 28 region around the roof. The local OBJ and overlay are under `local/dtm-authored/`, and the captures are under `local/dtm-modding/authored-roof/`.
 
 The standard Windows runner replayed the final lap at Oschersleben from frame 3250 through the post-race cutscene at frame 9300. All 404 replay checkpoints matched. The intake remained visible on the final straight as the race faded out. The replay trace and captures are under `local/dtm-authored/replay/`.
+
+### Roof geometry at other detail levels
+
+The class-package edit adjusted the roof in LODs 1–4. It raised centreline vertices in LODs 1 and 2. The two coarsest levels used a raised roof silhouette with the adjacent shared vertices moved by the same amount. The edits fit the original streams and the rebuilt package retained its disc extent.
+
+Paired Direct3D 12 runs at Oschersleben cycled through the cockpit, bonnet, bumper, and chase cameras. The modified LOD 0 roof remained visible on returning to chase view. The captures also showed pixel changes on distant opponents after editing the far roof. A local VIF1 DMA probe matched the edited LOD 4 roof stream on 347 frames, from frame 3105 to 3451. The ordinary runner and the probe produced eight byte-identical images with the same overlay. The modified LOD 1–3 streams matched guest RAM. Their use in a rendered frame still needs verification. Local evidence is under `local/dtm-authored/lod-test/` and `local/dtm-modding/lod-far-ordinary/`.
+
+Three diagnostic overlays changed the four floats at `.mdl` offset `0x18`. The recorded roof transfers still used LODs 0 and 4 at the same frames. The probe traces from those experiments are under `local/dtm-modding/lod-force-1/` through `lod-force-3/`.

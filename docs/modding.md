@@ -161,6 +161,8 @@ For another circuit, work on a copy of this pack and edit its `tqa4` resources. 
 
 Start with a DTM car. The verified PS2 archive for the class is `CARDATA\DTMX\DTMX.JPK`. Its directory includes the Audi A4 `.mdl` and `.msh` pair, textures, `CarParts.big`, and variant packages such as `dtmx_00.big`. The two model files are a paired PS2 format. The [RD3_BD7sTools](https://github.com/BuilderDemo7/RD3_BD7sTools) project targets conversion from PSP track `.p3d` to PC `.px` and is still under development. The ZModeler Race Driver filter documents the desktop mesh workflow and the shared part map layout. [PS2 comparison](ps2-disc-and-archives.md#stock-ps2-dtm-models-and-oschersleben-collision)
 
+### Inspect a car part map
+
 ```powershell
 python scripts/ModAssets.py extract --disc $disc --package dtm-cars DTM_A4.mdl "$work\DTM_A4.mdl"
 python scripts/ModAssets.py extract --disc $disc --package dtm-cars DTM_A4.msh "$work\DTM_A4.msh"
@@ -168,7 +170,7 @@ python scripts/ModAssets.py extract --disc $disc --package dtm-cars --inside dtm
 python scripts/ModAssets.py part-map-export "$work\part.map" "$work\part-map.json"
 ```
 
-`part.map` starts with three little-endian 32-bit words for the version, number of LOD rows, and entries per row. The candidate DTM variant holds version 1, five rows, and 320 entries per row. JSON lists the raw unsigned 32-bit values in order and preserves the original bit patterns. Keep the dimensions unchanged for an edit of the same car. The meaning of individual indices still needs verification against the associated PS2 meshes.
+`part.map` starts with three little-endian 32-bit words for the version, number of LOD rows, and entries per row. The reference DTM variants use version 1, five rows, and 320 entries per row. JSON lists the raw unsigned 32-bit values in order and preserves the original bit patterns. Keep the dimensions unchanged when editing the same car. Use the model's part counts to match the variant, and keep `0xffffffff` for absent parts. [DTM variant mapping](ps2-dtm-models.md#match-a-variants-part-map-to-its-model)
 
 ```powershell
 python scripts/ModAssets.py part-map-import "$work\part-map.json" "$work\part-rebuilt.map"
@@ -177,4 +179,4 @@ python scripts/ModAssets.py replace --disc $disc --package dtm-cars --inside dtm
 
 Run an unedited JSON round trip first. The rebuilt map should have the same SHA-256 as the extracted file. After a small edit, extract the member again from `DTMX-test.JPK` and compare it to the intended bytes. A one-entry test changed the nested map, preserved the 5,145,344-byte outer extent, and matched every other decoded member at both levels. To load the rebuilt package, give it the name `DTMX.JPK` in a `--dtm-mod` directory. [DTM model and overlay guide](ps2-dtm-models.md)
 
-The [DTM model and overlay guide](ps2-dtm-models.md) covers the `.mdl`/`.msh` structure and a CSV workflow for editing vertex positions. Before replacing a complete model, match the textures, part identifiers, and damage attachments. Test wheel and suspension movement, body panels, cockpit views, sound, and LODs before creating a permanent car slot.
+The DTM model and overlay guide covers the `.mdl`/`.msh` structure, OBJ exports by detail level, and two ways to edit a mesh. Before replacing a complete model, match the textures, part identifiers, and damage attachments. Test wheel and suspension movement, body panels, cockpit views, sound, and LODs before creating a permanent car slot. [DTM model and overlay guide](ps2-dtm-models.md)

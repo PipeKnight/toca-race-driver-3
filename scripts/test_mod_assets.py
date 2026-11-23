@@ -15,7 +15,7 @@ from BuildRoadAmericaMod import (
 from BuildTrackCollisionOverlay import encode_lzss, encode_lzss_compact
 from BuildTrackGeometryOverlay import FOOTER, RELOCATION, VERTEX as SCENE_VERTEX, vif_commands
 from ModAssets import find_member, replace_member
-from Ps2CarModel import UV, mesh_export, mesh_import, mesh_packets, mesh_replace
+from Ps2CarModel import MeshPacket, UV, lod_packet_ranges, mesh_export, mesh_import, mesh_packets, mesh_replace
 from Ps2TrackCollision import CELL, GRID_CELLS, POLYGON, REFERENCE, TRIANGLE, VERTEX, Collision, collision_append
 from Ps2TrackRoute import EVENT, MAGIC, POINT, SECTION, read_route, route_export, route_import
 from Ps2TrackScene import Scene, scene_append
@@ -334,6 +334,20 @@ class ModAssetTests(unittest.TestCase):
             mesh_import(SimpleNamespace(mesh=stock, positions=positions, output=output))
             struct.pack_into("<f", mesh, streams[0].position, 0.8)
             self.assertEqual(output.read_bytes(), mesh)
+
+    def test_car_detail_levels_follow_model_dma_block_extents(self):
+        base = 0x02bd0b60
+        model = bytearray(64)
+        struct.pack_into("<2I", model, 0, 0x30000002, base)
+        struct.pack_into("<2I", model, 16, 0x30000002, base + 32)
+        struct.pack_into("<2I", model, 48, 0x30000004, base + 64)
+        sections = [(0, 32), (32, 64)]
+        packets = [MeshPacket(position, 0, 0, 1, True) for position in (4, 36, 68, 100)]
+        self.assertEqual(lod_packet_ranges(model, sections, base, 128, packets),
+                         [range(0, 2), range(2, 4)])
+        struct.pack_into("<I", model, 52, base + 80)
+        with self.assertRaisesRegex(ValueError, "contiguous mesh blocks"):
+            lod_packet_ranges(model, sections, base, 128, packets)
 
     def test_car_obj_replacement_packs_independent_faces_into_fixed_capacity(self):
         count = 9
