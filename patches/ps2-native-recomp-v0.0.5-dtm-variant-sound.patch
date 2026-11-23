@@ -1,0 +1,94 @@
+diff --git a/runtime/src/disc.cpp b/runtime/src/disc.cpp
+--- a/runtime/src/disc.cpp
++++ b/runtime/src/disc.cpp
+@@ -209,8 +209,11 @@
+     DtmVariantFile{"CARDATA\\DTMX\\LOOKUP.INI", "lookup.ini", 460, 460},
+     DtmVariantFile{"CARDATA\\DTMX\\QA_TOURING.MDL", "QA_Touring.mdl", 72716, 0},
+     DtmVariantFile{"CARDATA\\DTMX\\QA_TOURING.MSH", "QA_Touring.msh", 376572, 0},
++    DtmVariantFile{"SOUND\\CARS.BIG", "cars.big", 2 * 1024 * 1024, 0},
++    DtmVariantFile{"SOUND\\SYSTEM.ICZ", "system.icz", 2048, 0},
+ };
+ constexpr std::size_t dtm_variant_menu_start = 3;
++constexpr std::size_t dtm_variant_sound_start = 7;
+ constexpr std::uint32_t dtm_variant_first_sector = 742000;
+ constexpr std::uint32_t dtm_variant_event_sector = 81008;
+ constexpr std::size_t dtm_variant_event_size = 0x1fe800;
+@@ -340,7 +343,7 @@
+     const auto &package = mod->files[0];
+     const bool free_race = !raw_variant_member(package, dtm_variant_files[dtm_variant_menu_start].name).empty();
+     if (free_race) {
+-        for (std::size_t i = dtm_variant_menu_start; i < dtm_variant_files.size(); ++i) {
++        for (std::size_t i = dtm_variant_menu_start; i < dtm_variant_sound_start; ++i) {
+             const auto &descriptor = dtm_variant_files[i];
+             const auto payload = raw_variant_member(package, descriptor.name);
+             if (payload.empty() || payload.size() > descriptor.limit ||
+@@ -355,6 +358,22 @@
+             std::fprintf(stderr, "[dtm-mod] invalid class model or mesh\n");
+             return false;
+         }
++    }
++    std::error_code sound_error;
++    std::size_t sound_count = 0;
++    for (std::size_t i = dtm_variant_sound_start; i < dtm_variant_files.size(); ++i) {
++        const auto &descriptor = dtm_variant_files[i];
++        const auto path = root / descriptor.name;
++        const bool exists = std::filesystem::exists(path, sound_error);
++        if (sound_error || (exists && !load_dtm_variant_file(path, mod->files[i], descriptor.limit, 0))) {
++            std::fprintf(stderr, "[dtm-mod] invalid sound asset %s\n", descriptor.name);
++            return false;
++        }
++        sound_count += exists;
++    }
++    if (sound_count && sound_count != dtm_variant_files.size() - dtm_variant_sound_start) {
++        std::fprintf(stderr, "[dtm-mod] variant sound requires both cars.big and system.icz\n");
++        return false;
+     }
+     auto relative = dtm_variant_first_sector;
+     for (std::size_t i = 0; i < mod->files.size(); ++i) {
+@@ -673,6 +692,11 @@
+     if (!prepare_road_america() || !prepare_dtm_mod()) return false;
+     if (!os::env("PS2_DISC_CHECK").empty()) self_check();
+     return true;
++}
++
++bool dtm_variant_uses_legacy_sound(std::uint32_t mechanics_name) {
++    return g_dtm_variant && !g_dtm_variant->files[dtm_variant_sound_start].empty() &&
++           upper(std::string(guest_name(mechanics_name))) == "DB5";
+ }
+ 
+ bool dtm_variant_record(std::uint32_t filename, std::uint32_t record) {
+diff --git a/runtime/include/ps2/disc.hpp b/runtime/include/ps2/disc.hpp
+--- a/runtime/include/ps2/disc.hpp
++++ b/runtime/include/ps2/disc.hpp
+@@ -35,6 +35,7 @@
+ void set_dtm_mod_directory(const std::string &folder);
+ bool road_america_enabled();
+ void road_america_path(std::uint32_t address);
++bool dtm_variant_uses_legacy_sound(std::uint32_t mechanics_name);
+ bool dtm_variant_record(std::uint32_t filename, std::uint32_t record);
+ std::uint32_t road_america_member(std::uint32_t address, std::uint32_t scratch);
+ std::optional<Entry> find(const std::string &path);
+diff --git a/recomp/codegen.cpp b/recomp/codegen.cpp
+--- a/recomp/codegen.cpp
++++ b/recomp/codegen.cpp
+@@ -217,7 +217,8 @@
+         const bool asset_hooks = !relocatable_ && !options_.live_stamp &&
+             ((base_ <= 0x002568E4u && 0x002568E4u < end) ||
+              (base_ <= 0x002566E0u && 0x002566E0u < end) ||
+-             (base_ <= 0x00389084u && 0x00388F98u < end));
++             (base_ <= 0x00389084u && 0x00388F98u < end) ||
++             (base_ <= 0x0037C528u && 0x0037C528u < end));
+         out_ << "#include \"units.hpp\"\n";
+         if (asset_hooks) out_ << "#include \"ps2/disc.hpp\"\n";
+         out_ << "\nnamespace gen {\n\nusing namespace ps2;\n\n";
+@@ -253,6 +254,10 @@
+             if (options_.probes.count(a)) line(std::format("probe(c, {});", pc(a)));
+             const Insn i = at(a);
+             if (asset_hooks) {
++                // Keep the legacy loops initialized by the car configuration for the imported DB5.
++                if (a == 0x0037C528u && i.word == 0x27bdb540u)
++                    line("if (disc::dtm_variant_uses_legacy_sound(ld32(0x005726c8u) + 0x140u)) "
++                         "{ set32(c.r[2], 0u); c.pc = c.r[31].w[0]; return; }");
+                 if (a == 0x002566E0u && i.word == 0x27bdffb0u)
+                     line("if (disc::dtm_variant_record(c.r[4].w[0], c.r[5].w[0])) "
+                          "{ set32(c.r[2], 1u); c.pc = c.r[31].w[0]; return; }");

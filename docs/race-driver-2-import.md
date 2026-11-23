@@ -138,4 +138,18 @@ Start the introductory race from a fresh data directory. The builder installs th
 
 The donor cockpit is in the RD2 interior archive at `RD2_1.HUG` sector 797863 under the `int_db5` basename. It has its own model pair and textures. The RD3 DTM cockpit uses `int_dtm.px`, a version 3 `PS2M` container, and TIM2 textures from `int_dtm.big`. Cockpit conversion requires support for those formats.
 
-The RD2 sound archive at `RD2_1.HUG` sector 1000174 contains `AstonDB5.ini`, `AstonDB5.msc`, `AstonDB5ai.ini`, `AstonDB5ai.msc`, and `grup_db5.msc`. It spans 11,115,173 bytes through the last member. The RD3 sound archive at `RDH_2.HUG` sector 369392 already contains the common `grup_db5.msc` gear-change sample and the QA Touring engine configuration. The DB5 player and AI engine banks still need to be registered with RD3.
+### Test the legacy DB5 sound banks
+
+Build the Windows launcher with the variant sound patch from the source manifest, then create a separate pack with `--donor-sound`.
+
+```powershell
+$soundPack = Join-Path $work 'DB5 sound test'
+python scripts/BuildRd2Db5Variant.py --rd2-disc $rd2 --disc $rd3 --output $soundPack --donor-sound
+& $launcher --disc $rd3Iso --dtm-mod $soundPack --data-dir "$work\db5-sound-test-player"
+```
+
+The builder reads the 11,115,173-byte RD2 sound archive at `RD2_1.HUG` sector 1000174. It adds four members to a local copy of RD3's 211-entry `Sound\Cars.big` at `RDH_2.HUG` sector 369392. The player and AI INIs get the `DB5` variant prefix. Their `<ELOOPS>` values keep the original sample filenames. The existing `grup_db5.msc` gear-change bank in RD3 matches the donor bytes. The optional `cars.big` and `system.icz` files must be installed together.
+
+Both mechanics CSVs set column 57, counting from zero, to `DB5` only for the added variant. The separate `Sound\System.icz` index at `RDH_2.HUG` sector 371022 maps that name to bank 37 for the game's file existence check. Without a mapping the game tries `Unknown.big` and falls back to `Puma.big`. That path halted the Windows runner during the introductory race load. For a player using the DB5 sound pack, the runner keeps the legacy loop table and skips the streaming engine initializer. Stock engines still use their normal initialization.
+
+On Windows 11, the DB5 ran through frame 3900 of the introductory Oschersleben race with the streaming initializer skipped. Its legacy player loop bank and shift sample were found in guest RAM. Two SPU2 captures matched before the race and differed after load when the player sound configuration was changed. In a separate Free Race with the player in the stock Vectra, the donor AI loop bank was found in guest RAM after 12000 frames. Compare the mix and loop transitions with the original game before treating audio fidelity as verified.

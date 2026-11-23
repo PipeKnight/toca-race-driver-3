@@ -8,9 +8,9 @@ from pathlib import Path
 import struct
 
 from BuildDtmVariant import append_variant, read_disc_range
-from BuildRoadAmericaMod import EVENT_CATALOG_BYTES, EVENT_CATALOG_SECTOR, repack_jpak
+from BuildRoadAmericaMod import EVENT_CATALOG_BYTES, EVENT_CATALOG_SECTOR, read_bigf, repack_bigf, repack_jpak
 from BuildTrackCollisionOverlay import (
-    DONOR_DIRECTORY_HASH, REFERENCE_DIRECTORY_HASH, SECTOR_SIZE, read_exact, verify_directory,
+    BIGF_ENTRY, DONOR_DIRECTORY_HASH, REFERENCE_DIRECTORY_HASH, SECTOR_SIZE, read_exact, verify_directory,
 )
 from ConvertRd2CarModel import convert_model, convert_textures
 from ModAssets import REFERENCE_PACKAGES, find_member, read_part_map, replace_member
@@ -42,14 +42,14 @@ def tire_radii(model, part_map):
     return radii
 
 
-def driving_csv(donor, target, name, radii):
+def driving_csv(donor, target, name, radii, donor_sound=False):
     source_rows = list(csv.reader(member(donor, name).decode("ascii").splitlines()))
     target_rows = list(csv.reader(member(target, name).decode("ascii").splitlines()))
     if (len(source_rows) != 1 or len(target_rows) != 1 or len(source_rows[0]) != 130
             or len(target_rows[0]) != 200 or source_rows[0][:3] != ["car", "Aston Martin DB5", "Standard"]):
         raise ValueError(f"Unexpected DB5 or RD3 fields in {name}")
     source, row = source_rows[0], target_rows[0]
-    # Preserve RD3's extra fields and its installed sound bank references.
+    # Preserve RD3's extra fields.
     for start, end in ((1, 49), (50, 57), (62, 129)):
         for index in range(start, end):
             if source[index]:
@@ -57,12 +57,38 @@ def driving_csv(donor, target, name, radii):
             elif 17 <= index < 49 or 68 <= index < 76:
                 row[index] = "0"
     row[145:147] = radii
+    if donor_sound:
+        row[57] = "DB5"
     output = io.StringIO()
     csv.writer(output, lineterminator="\r\n").writerow(row)
     return output.getvalue().encode("ascii")
 
 
-def build(rd2, rd3):
+def sound_assets(rd2, rd3):
+    with (rd2 / "RD2_1.HUG").open("rb") as stream:
+        donor = read_exact(stream, 1000174 * SECTOR_SIZE, 11115173)
+    reference = read_disc_range(rd3, 2, 369392, 1345212)
+    sounds, _ = read_bigf(reference, 211)
+    for original, name in (
+            ("AstonDB5.ini", b"DB5.ini"), ("AstonDB5ai.ini", b"DB5ai.ini"),
+            ("AstonDB5.msc", b"AstonDB5.msc"), ("AstonDB5ai.msc", b"AstonDB5ai.msc")):
+        if any(key.lower() == name.lower() for key in sounds):
+            raise ValueError(f"The reference sound archive already contains {name.decode('ascii')}")
+        sounds[name] = member(donor, original)
+    if sounds[b"grup_db5.msc"] != member(donor, "grup_db5.msc"):
+        raise ValueError("The shared DB5 gear shift bank does not match")
+
+    base = (0x24 + BIGF_ENTRY.size * len(sounds) + SECTOR_SIZE - 1) & -SECTOR_SIZE
+    size = base + sum((len(payload) + 31) & ~31 for payload in sounds.values())
+    cars = repack_bigf(reference[:0x24].ljust(size, b"\0"), sounds, base, base, size)
+    system = read_disc_range(rd3, 2, 371022, 735)
+    if not system.startswith(b"[Loops]\r\n") or b"\r\nMERCDTM=37\r\n" not in system or b"DB5=" in system:
+        raise ValueError("The reference sound index does not have the expected loop mappings")
+    # Keep the stock archive existence check on a valid path. The runtime retains the DB5 loop table.
+    return {"cars.big": cars, "system.icz": system + b"DB5=37\r\n"}
+
+
+def build(rd2, rd3, donor_sound=False):
     verify_directory(rd2 / "RD2.DIR", DONOR_DIRECTORY_HASH)
     verify_directory(rd3 / "RDH.DIR", REFERENCE_DIRECTORY_HASH)
     with (rd2 / "RD2_1.HUG").open("rb") as stream:
@@ -82,7 +108,7 @@ def build(rd2, rd3):
     radii = tire_radii(model, part_map)
     changes = {"part.map": part_map, "dmg.ini": member(donor_mechanics, "dmg.ini")}
     for name in ("Mech.csv", "SimMech.csv"):
-        changes[name] = driving_csv(donor_mechanics, variant, name, radii)
+        changes[name] = driving_csv(donor_mechanics, variant, name, radii, donor_sound)
     for name, data in changes.items():
         variant = replace_member(variant, [name], data)
     archive = repack_jpak(archive, 61, {
@@ -95,12 +121,15 @@ def build(rd2, rd3):
     if intro.count(car) != 1:
         raise ValueError("The reference introductory race's DTM car assignment was not found")
     events = replace_member(events, ["1st__.ini"], intro.replace(car, b"CareerOfferCarID = dtmx_20/CKL"))
-    return {
+    result = {
         "DTMX_EXT.JPK": archive,
         "DTMX_20_HI.TEX": high_texture,
         "QA_TOURING_HI.MSH": high,
         "events.big": events,
     }
+    if donor_sound:
+        result.update(sound_assets(rd2, rd3))
+    return result
 
 
 def main():
@@ -108,13 +137,14 @@ def main():
     parser.add_argument("--rd2-disc", type=Path, required=True)
     parser.add_argument("--disc", type=Path, required=True, help="extracted or mounted RD3 PS2 disc")
     parser.add_argument("--output", type=Path, required=True, help="new add-on directory")
+    parser.add_argument("--donor-sound", action="store_true", help="add the experimental DB5 legacy samples")
     args = parser.parse_args()
     try:
-        result = build(args.rd2_disc, args.disc)
+        result = build(args.rd2_disc, args.disc, args.donor_sound)
         args.output.mkdir()
         for name, data in result.items():
             (args.output / name).write_bytes(data)
-    except (OSError, ValueError, struct.error) as error:
+    except (OSError, KeyError, ValueError, struct.error) as error:
         parser.exit(1, f"DB5 build failed: {error}\n")
     print(args.output)
 
