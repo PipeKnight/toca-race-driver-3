@@ -4,6 +4,7 @@
 import argparse
 import csv
 import io
+import math
 from pathlib import Path
 import re
 import struct
@@ -45,6 +46,38 @@ def tire_radii(model, part_map):
             raise ValueError("Invalid DB5 tire radius")
         radii.append(f"{radius:.6f}")
     return radii
+
+
+def verify_wheel_lods(model, part_map):
+    _, base, _, sections = model_sections(model)
+    mapping = read_part_map(part_map)
+    mounts = (42, 48, 54, 60)
+    tires = (46, 52, 58, 64)
+    reference = {}
+    for lod, ((start, end), row) in enumerate(zip(sections, mapping, strict=True)):
+        first, last = (value - base for value in struct.unpack_from("<2I", model, start + 0x24))
+        for slot in (*mounts, *tires):
+            index = row[slot]
+            if lod == 4:
+                if index != 0xffffffff:
+                    raise ValueError("Expected the DB5's combined far-detail wheels in LOD 4")
+                continue
+            at = first + index * 0x30
+            if not first <= at <= last - 0x30 or struct.unpack_from("<I", model, at)[0] != 0:
+                raise ValueError(f"Missing DB5 wheel part {slot} in LOD {lod}")
+            draw = struct.unpack_from("<I", model, at + 8)[0] - base
+            if not last <= draw <= end - 0x60:
+                raise ValueError(f"Invalid DB5 wheel transform in LOD {lod}, part {slot}")
+            x, y, z, transform = struct.unpack_from("<3fI", model, draw + 0x50)
+            if transform != (3 if slot in mounts else 6):
+                raise ValueError(f"Unexpected DB5 wheel matrix index in LOD {lod}, part {slot}")
+            position = (x, y, z)
+            if not all(map(math.isfinite, position)):
+                raise ValueError(f"Non-finite DB5 wheel pivot in LOD {lod}, part {slot}")
+            if not lod:
+                reference[slot] = position
+            elif math.dist(position, reference[slot]) > .001:
+                raise ValueError(f"DB5 wheel pivot moves at LOD {lod}, part {slot}")
 
 
 def driving_csv(donor, target, name, radii, donor_sound=False):
@@ -128,6 +161,7 @@ def build(rd2, rd3, donor_sound=False, donor_cockpit=False):
     donor_mesh = member(donor_models, "db5.msh")
     model, high, low, part_map, _, _ = convert_model(
         donor_model, donor_mesh, member(target, "DTM_C_Klasse.mdl"))
+    verify_wheel_lods(model, part_map)
     high = paint_doors(model, high, part_map)
     low = paint_doors(model, low, part_map, lods=(1, 2, 3))
     texture = convert_textures(member(donor_models, "vc_2.tex"), member(target, "dtmx_13.tex"))
