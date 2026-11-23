@@ -1,0 +1,33 @@
+--- a/runtime/src/disc.cpp
++++ b/runtime/src/disc.cpp
+@@ -61,9 +61,9 @@
+     RoadAmericaMember{"DMA1.JPK", 513312, 3568768, "JPAK", 14},
+ };
+ 
+-constexpr std::array imported_track_ids{"TQA1", "TQA2", "TQA3", "TQA4"};
++constexpr std::array imported_track_ids{"TQA1", "TQA2", "TQA3", "TQA4", "TQA5"};
+ constexpr unsigned road_america_rain = imported_track_ids.size() + 1;
+-constexpr std::array imported_track_folders{"", "tqa2", "tqa3", "tqa4"};
++constexpr std::array imported_track_folders{"", "tqa2", "tqa3", "tqa4", "tqa5"};
+ 
+ struct RoadAmerica {
+     std::uint32_t archive_sector = 0;
+@@ -93,7 +93,8 @@
+     const bool catalog = std::string_view(member.magic) == "BIGF";
+     const auto count = u32(data.data() + (catalog ? 4 : 8));
+     if (size != data.size() || !complete || std::memcmp(data.data(), member.magic, 4) != 0 ||
+-        (count != member.entries && !(member.sector == road_america_members[0].sector && (count == 83 || count == 84)))) {
++        (count != member.entries && !(member.sector == road_america_members[0].sector &&
++                                      count >= 83 && count <= 80 + imported_track_ids.size()))) {
+         std::fprintf(stderr, "[road-america] invalid add-on member %s\n", filename.c_str());
+         return false;
+     }
+@@ -483,7 +484,7 @@
+ std::uint32_t road_america_member(std::uint32_t address, std::uint32_t scratch) {
+     if (!g_road_america || scratch > kRamSize - 128u) return address;
+     const auto name = guest_name(address);
+-    constexpr std::array keys{"tqa1", "tqa2", "tqa3", "tqa4"};
++    constexpr std::array keys{"tqa1", "tqa2", "tqa3", "tqa4", "tqa5"};
+     for (unsigned i = 0; i < g_road_america->courses; ++i) {
+         const auto pos = name.find(keys[i]);
+         if (pos == std::string_view::npos) continue;

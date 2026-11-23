@@ -5,10 +5,10 @@ This guide uses the North American PS2 disc `SLUS-21182` v1.02 and the portable 
 | I want to… | Start here |
 | --- | --- |
 | Import a Race Driver 2 circuit | Build Road America and both A1-Ring layouts from the two PS2 discs. [Race Driver 2 import guide](race-driver-2-import.md#convert-road-america-and-a1-ring) |
-| Build an original circuit | Start with the working Foundry Oval slot, then replace the road mesh, collision, and AI route together. [Foundry Oval example](#build-and-play-foundry-oval) |
+| Build an original circuit | Author a centerline and generate the road, collision, route, and timing sectors together. [Tsukuba example and authoring guide](author-a-circuit.md) |
 | Put my own geometry on a working car | Export one detail level of the DTM car as OBJ, author the replacement faces, and test an overlay. [DTM model workflow](ps2-dtm-models.md#replace-selected-mesh-packets-from-obj) |
 | Test a new car variant alongside the original cars | Build the additional DTM variant and drive it in the introductory race or select it in DTM Free Race. [Additional DTM variant](#test-an-additional-dtm-variant) |
-| Prepare a Race Driver 2 car for porting | Extract the Aston Martin DB5 and export its PS2 body by detail level. [Race Driver 2 car extraction](race-driver-2-import.md#extract-and-preview-the-aston-martin-db5) |
+| Import a Race Driver 2 car | List donor variants, convert their model files, or build the playable DB5 preset. [RD2 car importer](import-rd2-cars.md) |
 
 ## Inspect and extract files
 

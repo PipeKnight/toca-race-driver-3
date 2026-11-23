@@ -106,8 +106,10 @@ def build_geometry(work):
               ((i, i+1, i+columns+1, i+columns) for i in range(len(ground)-columns) if i % columns != columns-1))
 
 
-def build_packages(track, dma, work):
-    build_geometry(work)
+def build_packages(track, dma, work, *, route=None, markings=False):
+    if route is None:
+        build_geometry(work)
+        route = build_route()
     original_collision = work / "template.col"
     original_collision.write_bytes(find_member(track, "col.col")[0].read(track))
     original_scene = work / "template.dma"
@@ -124,8 +126,14 @@ def build_packages(track, dma, work):
     leaf, = ground.leaves(root)
     finished = work / "oval.dma"
     scene_append(SimpleNamespace(command="scene-append", input=scene, output=finished, obj=work / "road.obj",
-                                 root=root, leaf=leaf, rgb=(135, 135, 148), offset_y=0.017))
-    track = replace_member(track, ["osc1.big", "osc1.ail"], build_route())
+                                  root=root, leaf=leaf, rgb=(135, 135, 148), offset_y=0.017))
+    if markings:
+        marked = work / "marked.dma"
+        scene_append(SimpleNamespace(command="scene-append", input=finished, output=marked,
+                                     obj=work / "markings.obj", root=root, leaf=leaf,
+                                     rgb=(230, 230, 230), offset_y=0.027))
+        finished = marked
+    track = replace_member(track, ["osc1.big", "osc1.ail"], route)
     track = replace_member(track, ["col.col"], collision.read_bytes())
     return track, replace_member(dma, ["trk.dma"], finished.read_bytes())
 

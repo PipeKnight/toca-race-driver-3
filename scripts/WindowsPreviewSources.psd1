@@ -27,6 +27,7 @@
         'ps2-native-recomp-v0.0.5-a1-ring.patch'
         'ps2-native-recomp-v0.0.5-road-america-rain.patch'
         'ps2-native-recomp-v0.0.5-fourth-track-slot.patch'
+        'ps2-native-recomp-v0.0.5-fifth-track-slot.patch'
         'ps2-native-recomp-v0.0.5-dtm-variant.patch'
         'ps2-native-recomp-v0.0.5-dtm-free-race.patch'
         'ps2-native-recomp-v0.0.5-dtm-converted-model.patch'
