@@ -369,4 +369,10 @@ The oval's route is 701.59 m long with 72 main stations, 37 pit stations, and 17
 
 On Windows 11 Direct3D 12, the Autosport Clio Cup race finished with Player One **4th of 20 in 33.03 seconds**. The runner with the fourth-slot patch matched all 162 replay checkpoints and triggered the autosave. The card passed filesystem and ECC checks after 772 page writes. A cold process reached the main menu after reading 341 pages and writing zero, with the original card hash. Local evidence is in `local/a1-ring-pack/short-foundry-oval-grid/`, `short-foundry-oval-results/`, and `short-foundry-race-reload/`.
 
-Time Trial reached the course and counted laps in the initial authoring tests. The test runs left the road, and the game did not record a best lap. Repeat that check after refining the route and the run-off behavior.
+#### Foundry Oval Time Trial sectors
+
+A recorded, centred drive set a **36.34-second** best lap on the original pack. A paced opening pass of **45.58** followed by a faster full lap of **39.45** reproduced the distinction between the two save systems. The original pack wrote `tqa4` and `RCL` to the profile's `LapRecords` block with the correct lap time, and its ghost file stayed byte-identical to the starting card. As a separate control, the same `tqa4` slot saved an A1-Ring Short donor ghost successfully.
+
+The ghost update routine at `0x001479f8` waits for the sector sequence before finalizing at the finish. The corrected builder emits main-route code `2` at stations 24 and 48, with arguments `0` and `1`. Those events changed three bytes in `osc1.ail`. Replaying the same Foundry input saved the same **39.45** profile time and a new ghost. The card passed filesystem and ECC checks. A repeat of the Free Race with the corrected pack still placed Player One **4th of 20**, in **34.39 seconds**, and autosaved.
+
+After a cold launch, **Load** listed Player One's **39.45** Racing Clio ghost for Foundry Oval alongside the existing Dirt Raceway 1 ghost. The game confirmed the load, and the active ghost advanced to sample 97 of 198 in the next session. Its header contained `tqa4` and the same lap time. The cold run read 421 memory card pages and wrote zero, preserving the card hash. Local evidence is under `local/a1-ring-pack/short-foundry-tt-sectors/`, `short-foundry-tt-sectors-cold/`, and `short-foundry-tt-sectors-race/`.

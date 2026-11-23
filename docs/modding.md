@@ -60,6 +60,8 @@ python scripts/ModAssets.py route-obj "$work\roa.ail" "$work\roa-route.obj"
 
 Main-route codes `12` and `13` delimit the span represented by the auxiliary route. The importer checks the number of stations across that span, including both endpoints and any wrap across the start line. It retains the template's lane mask and loop flag for every section. Keep the distances and normals consistent with the edited lane positions. Small lateral edits can reuse the template distances. A new route shape needs its own distances, normals, and matching collision.
 
+For Time Trial ghosts, keep the main-route sector splits in driving order. Foundry Oval uses code `2` with arguments `0` and `1` for the two splits in a three-sector lap. A lap can reach the profile's lap records while the ghost recorder is still waiting for its sector sequence. Check the ghost itself in **Load** after a cold launch. [Foundry Oval sector verification](ps2-disc-and-archives.md#foundry-oval-time-trial-sectors)
+
 Set `$addon` to the [expanded add-on](ps2-disc-and-archives.md#add-a1-ring-gp-and-short) with A1-Ring Short in `tqa3`.
 
 ```powershell
@@ -150,6 +152,8 @@ python scripts/BuildFoundryOval.py 'D:\Mods\Road America and A1-Ring' 'D:\Mods\F
 ```
 
 In **Free Race**, choose **Autosport Clio Cup**, then **Foundry Oval**. The same circuit is available in Time Trial. It uses the reference loading screen and a material from your Road America pack. The flat collision surface extends into the run-off area, and the demonstration has no barriers.
+
+To enable ghost saving on a previously generated Foundry pack, run the current builder with a new output directory. Launch that pack with the same Windows preview 6 executable. In Time Trial, choose **New** in the ghost menu, select a slot, and acknowledge the confirmation. Drive an opening pass at a lower pace, then complete a faster full lap with both sector splits. End the session to save the recording. [Time Trial verification](ps2-disc-and-archives.md#foundry-oval-time-trial-sectors)
 
 For another circuit, work on a copy of this pack and edit its `tqa4` resources. `collision-build` generates a new `col.col` from the supplied triangulated OBJ, taking a surface type from the template. `scene-replace` substitutes the root of `trk.dma` with the supplied OBJ mesh and the selected local material. Use `scene-append` for a second surface or mesh. Supply a matching `AILD` route in `osc1.big/osc1.ail`. See `scripts/BuildFoundryOval.py` for an example that generates all three assets. [Route editing](#edit-route-lanes-and-checkpoints) · [Foundry Oval verification](ps2-disc-and-archives.md#foundry-oval)
 

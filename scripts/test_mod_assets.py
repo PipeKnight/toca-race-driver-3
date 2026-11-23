@@ -8,6 +8,7 @@ import tempfile
 from types import SimpleNamespace
 import unittest
 
+from BuildFoundryOval import build_route
 from BuildRoadAmericaMod import (
     A1_RING, ROAD_AMERICA, TrackEntry, event_catalog, read_bigf, repack_bigf, track_catalog, unpack_lzss,
 )
@@ -21,6 +22,13 @@ from Ps2TrackScene import Scene, scene_append
 
 
 class ModAssetTests(unittest.TestCase):
+    def test_foundry_route_has_ordered_sector_splits_for_ghost_recording(self):
+        main, _, _ = read_route(build_route())
+        self.assertEqual(main.events[0][3], 6)
+        splits = [(index, event[5]) for index, event in enumerate(main.events) if event[3] == 2]
+        self.assertEqual(splits, [(24, 0), (48, 1)])
+        self.assertEqual([event[4] for event in main.events if event[3] == 10], [0, 1, 2])
+
     def test_route_csv_preserves_lanes_and_verifies_the_auxiliary_span(self):
         header = MAGIC + SECTION.pack(4, 1, 1) + SECTION.pack(2, 0x21, 0) + SECTION.pack(3, 3, 0)
         events = b"".join(EVENT.pack(1, -0.0, distance, code, 255, 0, 0) for distance, code in

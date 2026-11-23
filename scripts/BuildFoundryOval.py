@@ -49,8 +49,10 @@ def station(distance, lateral=0):
 
 def build_route():
     distances = [i * LENGTH / STATIONS for i in range(STATIONS)]
-    main_codes = {0: (6, 255), 8: (13, 255), 17: (10, 0), 36: (10, 1), 54: (10, 2), 64: (12, 255)}
-    main = [(s, 0.0, *main_codes.get(i, (0, 255)), 0) for i, s in enumerate(distances)]
+    # Time Trial advances the ghost recorder at the sector splits before accepting the finish.
+    main_codes = {0: (6, 255, 0), 8: (13, 255, 0), 17: (10, 0, 0), 24: (2, 255, 0),
+                  36: (10, 1, 0), 48: (2, 255, 1), 54: (10, 2, 0), 64: (12, 255, 0)}
+    main = [(s, 0.0, *main_codes.get(i, (0, 255, 0))) for i, s in enumerate(distances)]
     pit = []
     for i, s in enumerate(range(-90, 91, 5)):
         lateral = 14.0 * min(1, (90 - abs(s)) / 30)
