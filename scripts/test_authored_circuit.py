@@ -26,6 +26,11 @@ class AuthoredCircuitTests(unittest.TestCase):
         self.assertEqual([event[4] for event in main.events if event[3] == 10], [0, 1, 2])
         self.assertAlmostEqual(math.dist(main.lanes[0][0], main.lanes[4][0]), circuit.width, places=3)
         self.assertEqual([event[3] for event in pit.events if event[3] not in (0, 3)], [5, 14, 6, 15, 11])
+        self.assertEqual(sum(event[3] == 1 for event in main.events), 1)
+        for gate in (5, 11, 14, 15):
+            i, = (i for i, event in enumerate(pit.events) if event[3] == gate)
+            center = circuit.position(pit.events[i][2])
+            self.assertGreater(math.dist(center, pit.lanes[0][i]), circuit.width / 2 + 5)
         self.assertGreater(pit.events[0][2], pit.events[-1][2])
         self.assertGreater(auxiliary.events[0][2], auxiliary.events[-1][2])
         self.assertEqual(len(auxiliary.events), 21)

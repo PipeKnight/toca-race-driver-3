@@ -115,20 +115,24 @@ def build_route(circuit):
     count = len(stations)
     first, second = (round(frac * count) for frac in circuit.sectors)
     boundary = round(80 * count / circuit.length)
+    pit_approach = count - round(96 * count / circuit.length)
     if first < boundary + 2 or second > count - boundary - 2:
         raise ValueError("Keep the timing splits outside the 80 m start/finish area")
     markers = {
         0: (6, 255, 0), boundary: (13, 255, 0),
         (boundary + first) // 2: (10, 0, 0), first: (2, 255, 0),
         (first + second) // 2: (10, 1, 0), second: (2, 255, 1),
-        (second + count - boundary) // 2: (10, 2, 0), count - boundary: (12, 255, 0),
+        (second + count - boundary) // 2: (10, 2, 0), pit_approach: (1, 255, 0), count - boundary: (12, 255, 0),
     }
+    if len(markers) != 9:
+        raise ValueError("Keep enough space between sector splits and the pit approach")
     main = [(d, 0., *markers.get(i, (0, 255, 0))) for i, d in enumerate(stations)]
     pit = []
     for i, d in enumerate(range(-90, 91, 5)):
-        slots = 5 <= i <= 31 and i % 2 == 1 and i != 17
-        code = {1: 5, 3: 14, 18: 6, 33: 15, 35: 11}.get(i, 3 if slots else 0)
-        pit.append((d, pit_offset(d, circuit.width), code, (i - 5) // 2 if code == 3 else 255, int(code == 3)))
+        # Place the pit-only gates on the offset lane, not on the racing surface at the merge.
+        slots = 9 <= i <= 27 and i % 2 == 1
+        code = {6: 5, 8: 14, 18: 6, 28: 15, 30: 11}.get(i, 3 if slots else 0)
+        pit.append((d, pit_offset(d, circuit.width), code, (i - 9) // 2 if code == 3 else 255, int(code == 3)))
     auxiliary = [(d, 0., 0, 1, 0) for d in stations[-boundary:] + stations[:boundary + 1]]
     half = circuit.width / 2
     # The main route's outer lanes frame the drivable ribbon instead of collapsing onto its center.
