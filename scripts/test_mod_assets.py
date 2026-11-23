@@ -64,6 +64,9 @@ class ModAssetTests(unittest.TestCase):
             self.assertEqual(result[new.uv.payload:new.uv.payload + new.uv.size],
                              source[old.uv:old.uv + new.uv.size])
         self.assertEqual(len(result) % 16, 0)
+        single = packet(0x100, 3, material)
+        rebuilt, _, _ = replace_draw_strips(single, 0, len(single), source, strips[:1])
+        self.assertEqual([item.vertex.count for item in cockpit_draw_packets(rebuilt, 0, len(rebuilt))], [7])
         word.pack_into(result, 8, 3)
         with self.assertRaisesRegex(ValueError, "Inconsistent cockpit strip"):
             list(cockpit_draw_packets(result, 0, len(result)))

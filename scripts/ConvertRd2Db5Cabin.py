@@ -152,8 +152,11 @@ def rear_mirror(cabin, mesh, strips):
     if min(right - left, top - bottom) < .01:
         raise ValueError("Invalid DB5 mirror glass dimensions")
     glass = Strips()
-    glass.add(face, [(.01 + .98 * (right - x) / (right - left), .02 + .96 * (top - y) / (top - bottom))
-                     for x, y, _ in face])
+    # Use the donor's width and height but place the flat reflective surface ahead of the housing.
+    # The original glass strip is nearly coplanar with the housing and can disappear in the port.
+    depth = min(point[2] for point in face) - .006
+    glass.add(((left, bottom, depth), (left, top, depth), (right, bottom, depth), (right, top, depth)),
+              ((.98, .98), (.98, .02), (.02, .98), (.02, .02)))
 
     mount = Strips()
     for strip in strips[:-1]:

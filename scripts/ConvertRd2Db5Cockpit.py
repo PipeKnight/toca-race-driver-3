@@ -57,12 +57,13 @@ def convert_shell(model, mesh, target):
 
 
 def replace_draw_strips(target, begin, end, mesh, strips):
-    templates = tuple(islice(cockpit_draw_packets(target, begin, end), 4))
-    if (len(templates) != 4
+    count = min(4, len(strips))
+    templates = tuple(islice(cockpit_draw_packets(target, begin, end), count))
+    if (len(templates) != count or not count
             or tuple(read_word(target, packet.start + 4) for packet in templates)
-            != (0x100, 0x200, 0x300, 0x100)
+            != (0x100, 0x200, 0x300, 0x100)[:count]
             or tuple(read_word(target, packet.start + 12) for packet in templates)
-            != (0x108, 0x201, 0x301, 0x101)):
+            != (0x108, 0x201, 0x301, 0x101)[:count]):
         raise ValueError("Missing RD3 cockpit shell draw templates")
 
     payload = bytearray()
