@@ -1,0 +1,80 @@
+diff --git a/runtime/src/disc.cpp b/runtime/src/disc.cpp
+--- a/runtime/src/disc.cpp
++++ b/runtime/src/disc.cpp
+@@ -173,17 +173,26 @@
+     return true;
+ }
+ 
+-bool valid_dtm_hi_mesh(const std::vector<std::uint8_t> &data) {
++bool valid_dtm_car_asset(std::span<const std::uint8_t> data, std::uint32_t base, bool mesh) {
++    if (data.size() < 12) return false;
+     const auto footer = data.size() - 12;
+     const auto count = u32(data.data() + footer);
+     const auto payload = u32(data.data() + footer + 4);
+-    if (u32(data.data() + footer + 8) != 0x0abd0be0 || payload % 16 || payload > footer ||
+-        (footer - payload) % 8 || (footer - payload) / 8 != count) return false;
++    if (u32(data.data() + footer + 8) != base || !payload || payload % 16 || payload > footer ||
++        (footer - payload) % 8 || (footer - payload) / 8 != count || !count) return false;
+     for (std::size_t row = payload; row < footer; row += 8) {
+         const auto offset = u32(data.data() + row);
+-        if (offset >= payload || offset % 4 || u32(data.data() + row + 4) != 4) return false;
++        const auto kind = u32(data.data() + row + 4);
++        if (offset >= payload || offset % 4) return false;
++        if (mesh && (kind != 4 || (data[offset + 3] & 0x7f) != 0x14)) return false;
++        if (!mesh && kind != 0 && kind != 3 && kind != 4) return false;
++        if (kind == 3 && payload - offset < 8) return false;
+     }
+     return true;
++}
++
++bool valid_dtm_hi_mesh(const std::vector<std::uint8_t> &data) {
++    return valid_dtm_car_asset(data, 0x0abd0be0, true);
+ }
+ 
+ struct DtmVariantFile {
+@@ -194,12 +203,12 @@
+ };
+ constexpr std::array dtm_variant_files{
+     DtmVariantFile{"CARDATA\\DTMX\\DTMX.JPK", "DTMX_EXT.JPK", 8 * 1024 * 1024, 0},
+-    DtmVariantFile{"CARDATA\\DTMX\\QA_TOURING_HI.MSH", "QA_TOURING_HI.MSH", 369788, 369788},
+-    DtmVariantFile{"CARDATA\\DTMX\\DTMX_20_HI.TEX", "DTMX_20_HI.TEX", 381204, 381204},
++    DtmVariantFile{"CARDATA\\DTMX\\QA_TOURING_HI.MSH", "QA_TOURING_HI.MSH", 369788, 0},
++    DtmVariantFile{"CARDATA\\DTMX\\DTMX_20_HI.TEX", "DTMX_20_HI.TEX", 381204, 0},
+     DtmVariantFile{"CARDATA\\DTMX\\DTMX_20.BIG", "dtmx_20.big", 27264, 27264},
+     DtmVariantFile{"CARDATA\\DTMX\\LOOKUP.INI", "lookup.ini", 460, 460},
+-    DtmVariantFile{"CARDATA\\DTMX\\QA_TOURING.MDL", "QA_Touring.mdl", 72716, 72716},
+-    DtmVariantFile{"CARDATA\\DTMX\\QA_TOURING.MSH", "QA_Touring.msh", 376572, 376572},
++    DtmVariantFile{"CARDATA\\DTMX\\QA_TOURING.MDL", "QA_Touring.mdl", 72716, 0},
++    DtmVariantFile{"CARDATA\\DTMX\\QA_TOURING.MSH", "QA_Touring.msh", 376572, 0},
+ };
+ constexpr std::size_t dtm_variant_menu_start = 3;
+ constexpr std::uint32_t dtm_variant_first_sector = 742000;
+@@ -322,7 +331,8 @@
+             return false;
+         }
+     }
+-    if (!valid_dtm_package(mod->files[0], 61) || !valid_dtm_hi_mesh(mod->files[1])) {
++    if (!valid_dtm_package(mod->files[0], 61) || !valid_dtm_hi_mesh(mod->files[1]) ||
++        !valid_dtm_car_asset(mod->files[2], 0x08bd0bc0, false)) {
+         std::fprintf(stderr, "[dtm-mod] invalid variant archive or model\n");
+         return false;
+     }
+@@ -333,11 +343,17 @@
+         for (std::size_t i = dtm_variant_menu_start; i < dtm_variant_files.size(); ++i) {
+             const auto &descriptor = dtm_variant_files[i];
+             const auto payload = raw_variant_member(package, descriptor.name);
+-            if (payload.size() != descriptor.exact) {
++            if (payload.empty() || payload.size() > descriptor.limit ||
++                (descriptor.exact && payload.size() != descriptor.exact)) {
+                 std::fprintf(stderr, "[dtm-mod] missing or invalid Free Race asset %s\n", descriptor.name);
+                 return false;
+             }
+             mod->files[i].assign(payload.begin(), payload.end());
++        }
++        if (!valid_dtm_car_asset(mod->files[5], 0x00bd0b40, false) ||
++            !valid_dtm_car_asset(mod->files[6], 0x02bd0b60, true)) {
++            std::fprintf(stderr, "[dtm-mod] invalid class model or mesh\n");
++            return false;
+         }
+     }
+     auto relative = dtm_variant_first_sector;

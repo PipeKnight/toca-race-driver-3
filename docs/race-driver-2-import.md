@@ -92,7 +92,7 @@ python scripts/Ps2CarModel.py model-info "$converted\car.mdl" "$converted\car.ms
     --part-map "$converted\part.map"
 ```
 
-The conversion splits the RD2 mesh into LOD 0 and LODs 1–4, recalculates the DMA lengths and relocation offsets, and removes the separate RD2 color uploads where RD3's mesh walker expects positions. It compacts both the part and binding tables. The part map preserves the logical slot numbers and points each active slot to its new compact index. RD2 texture descriptors store an image byte count in the field RD3 uses for the mip upload count. The converter emits one upload per descriptor for the DB5 containers.
+The conversion splits the RD2 mesh into LOD 0 and LODs 1–4, recalculates the DMA lengths and relocation offsets, and removes the separate RD2 color uploads where RD3's mesh walker expects positions. It compacts both the part and binding tables. The part map preserves the logical slot numbers and points each active slot to its new compact index. RD3 uses a different starting index for the draw matrices and emits a local matrix in each LOD. The converter shifts the matrix index and replaces the older shared DMA references with RD3 inline chains. RD2 texture descriptors store an image byte count in the field RD3 uses for the mip upload count. The converter emits one upload per descriptor for the DB5 containers.
 
 | LOD | Drawable parts | Mesh packets |
 | --- | ---: | ---: |
@@ -106,7 +106,7 @@ The converter also rebuilt all five LODs of the RD2 Ford Falcon against the RD3 
 
 ### In-game status
 
-These outputs are development inputs. A Windows Direct3D 12 diagnostic runner displayed the converted exterior and donor livery in the selector. In the Oschersleben race, the car cast a shadow and responded to controls, while the body failed to render. The trace found a race-generated DMA reference starting inside a VIF vertex stream. Both the DB5 and Mercedes texture controls showed the same rendering symptom with the converted model.
+These outputs are development inputs. A Windows Direct3D 12 diagnostic runner displayed the converted exterior and donor livery in the selector and in the introductory Oschersleben race. Correcting the draw matrix index restored the exterior on track. The DB5 with the converted driving data completed the final lap in 20th place and advanced to the next cutscene. A separate Free Race fixture stalled at the loading screen and logged an invalid VIF stream. The selector, the introductory race, and this Free Race fixture use the existing QA Touring registration.
 
 ### Find the donor mechanics
 
@@ -120,4 +120,16 @@ foreach ($member in 'Mech.csv', 'SimMech.csv', 'dmg.ini', 'int.ini', 'num.ini') 
 }
 ```
 
-Each RD2 mechanics row has 130 columns. The RD3 QA Touring rows each have 200 columns. Copying the overlapping driving fields into the RD3 rows changed the car's speed at the same frame of a scripted Oschersleben run. The remaining RD3 fields, sound, cockpit, wheel motion, suspension, and damage behaviour still need their own checks. Acceptance requires a visible car in a race, functioning attachments through LOD transitions, and a classified finish.
+Each RD2 mechanics row has 130 columns. The RD3 QA Touring rows each have 200 columns. Copying the overlapping driving fields into the RD3 rows changed the car's speed at the same frame of a scripted Oschersleben run. The remaining RD3 fields, sound, cockpit, wheel motion, suspension, and damage behaviour still need their own checks. Acceptance requires a visible car in Free Race, functioning attachments through LOD transitions, and a classified finish.
+
+### Build the experimental pack from both discs
+
+Use a local Windows launcher built with `ps2-native-recomp-v0.0.5-dtm-converted-model.patch` from the source manifest. The released Windows preview 7 expects the older fixed-size variant files.
+
+```powershell
+$pack = Join-Path $work 'DB5 drive test'
+python scripts/BuildRd2Db5Variant.py --rd2-disc $rd2 --disc $rd3 --output $pack
+& $launcher --disc $rd3Iso --dtm-mod $pack --data-dir "$work\db5-drive-test-player"
+```
+
+Start the introductory race from a fresh data directory. The builder installs the exterior, both texture sets, the part map, the overlapping driving fields, and the RD2 damage configuration in the QA Touring test entry. The test entry retains the Mercedes type name, sound bank, and cockpit. The intro finishes with the original scripted cutscene.

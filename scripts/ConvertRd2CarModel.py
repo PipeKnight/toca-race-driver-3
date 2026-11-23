@@ -93,6 +93,45 @@ def count_part_chains(model, base, section_end, part):
     return (tag - first) // 16
 
 
+def convert_draw_transforms(model, base, relocations, sections):
+    output = bytearray(model)
+    entries = dict(relocations)
+    converted = set()
+    for start, end in sections:
+        first, last = (p - base for p in struct.unpack_from("<2I", model, start + 0x24))
+        if first != start + 0x30 or not first < last <= end or (last - first) % PART_BYTES:
+            raise ValueError("Invalid RD2 part table")
+        for part in range(first, last, PART_BYTES):
+            if read_word(model, part) != 0:
+                continue
+            draw = read_word(model, part + 8) - base
+            if draw in converted:
+                continue
+            converted.add(draw)
+            if not first <= draw <= end - 0xa0:
+                raise ValueError("Invalid RD2 draw transform location")
+            marker = read_word(model, draw)
+            if marker == 0x30000005:
+                # RD2 lower LODs borrow the high-detail matrix and skip the local one.
+                if (entries.get(draw) != 3 or entries.get(draw + 0x10) != 3
+                        or read_word(model, draw + 0x10) != 0x20000000
+                        or read_word(model, draw + 0x14) != base + draw + 0x70):
+                    raise ValueError("Unexpected RD2 shared matrix chain")
+                del entries[draw]
+                del entries[draw + 0x10]
+            elif marker != 0x10000000 or read_word(model, draw + 0x10) != 0x10000005:
+                raise ValueError("Unexpected RD2 inline matrix chain")
+            if read_word(model, draw + 0x60) >> 24 != 0x11:
+                raise ValueError("Missing RD2 transform chain terminator")
+            index = read_word(model, draw + 0x5c)
+            if not 1 <= index <= 5:
+                raise ValueError(f"Unsupported RD2 draw matrix index {index}")
+            # RD3 has an additional draw matrix slot before the five RD2 slots.
+            struct.pack_into("<8I", output, draw, 0x10000000, 0, 0, 0, 0x10000005, 0, 0, 0x6c048000)
+            struct.pack_into("<I", output, draw + 0x5c, index + 1)
+    return output, entries
+
+
 def compact_rd2_model(model, base, sections, packet_counts):
     first_header = sections[0][0]
     if first_header != 0x38:
@@ -147,6 +186,7 @@ def convert_model(model, mesh, target):
     if not texture_base or not high_base or not class_base or high_base == class_base:
         raise ValueError("The RD3 template must provide separate class and high-detail files")
     high, low, refs, counts = convert_mesh(mesh, model, sections, high_base, class_base)
+    model, relocations = convert_draw_transforms(model, base, relocations, sections)
     output, spans, maps = compact_rd2_model(model, base, sections, counts)
 
     def rebase(offset):
