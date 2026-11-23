@@ -137,3 +137,5 @@ python scripts/BuildRd2Db5Variant.py --rd2-disc $rd2 --disc $rd3 --output $pack
 Start the introductory race from a fresh data directory. The builder installs the exterior, both texture sets, the part map, the overlapping driving fields, and the RD2 damage configuration in the QA Touring test entry. The test entry retains the Mercedes type name, sound bank, and cockpit. The intro finishes with the original scripted cutscene.
 
 The donor cockpit is in the RD2 interior archive at `RD2_1.HUG` sector 797863 under the `int_db5` basename. It has its own model pair and textures. The RD3 DTM cockpit uses `int_dtm.px`, a version 3 `PS2M` container, and TIM2 textures from `int_dtm.big`. Cockpit conversion requires support for those formats.
+
+The RD2 sound archive at `RD2_1.HUG` sector 1000174 contains `AstonDB5.ini`, `AstonDB5.msc`, `AstonDB5ai.ini`, `AstonDB5ai.msc`, and `grup_db5.msc`. It spans 11,115,173 bytes through the last member. The RD3 sound archive at `RDH_2.HUG` sector 369392 already contains the common `grup_db5.msc` gear-change sample and the QA Touring engine configuration. The DB5 player and AI engine banks still need to be registered with RD3.
