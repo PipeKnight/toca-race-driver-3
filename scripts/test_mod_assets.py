@@ -33,34 +33,73 @@ class ModAssetTests(unittest.TestCase):
             output = work / "roundtrip.ail"
             source.write_bytes(original)
             route_export(SimpleNamespace(input=source, output=table))
-            args = SimpleNamespace(input=source, csv=table, output=output)
+            args = SimpleNamespace(input=source, csv=table, output=output, resize=False)
             route_import(args)
             self.assertEqual(output.read_bytes(), original)
             with table.open(newline="", encoding="utf-8") as stream:
                 reader = csv.DictReader(stream)
                 fields = reader.fieldnames
                 rows = list(reader)
+
+            def write_table():
+                with table.open("w", newline="", encoding="utf-8") as stream:
+                    writer = csv.DictWriter(stream, fields)
+                    writer.writeheader()
+                    writer.writerows(rows)
+
             self.assertEqual(rows[0]["x5"], "")
             self.assertEqual(float(rows[4]["x5"]), -6.125)
             rows[4]["x5"] = "-5.5"
             rows[1]["code"], rows[2]["code"] = rows[2]["code"], rows[1]["code"]
-            with table.open("w", newline="", encoding="utf-8") as stream:
-                writer = csv.DictWriter(stream, fields)
-                writer.writeheader()
-                writer.writerows(rows)
+            write_table()
             args.output = work / "edited.ail"
             with self.assertRaisesRegex(ValueError, "do not span"):
                 route_import(args)
             self.assertFalse(args.output.exists())
             rows[1]["code"], rows[2]["code"] = rows[2]["code"], rows[1]["code"]
-            with table.open("w", newline="", encoding="utf-8") as stream:
-                writer = csv.DictWriter(stream, fields)
-                writer.writeheader()
-                writer.writerows(rows)
+            write_table()
             route_import(args)
             edited = read_route(args.output.read_bytes())
             self.assertEqual(edited[1].lanes[1][0], (-5.5, 6.75))
             self.assertEqual(edited[0], read_route(original)[0])
+
+            rows[2:2] = [dict(rows[2], distance_m="40", x0="-1.5")]
+            for station, row in enumerate(rows[:5]):
+                row["station"] = str(station)
+            args.output = work / "resized.ail"
+            write_table()
+            with self.assertRaisesRegex(ValueError, "Use --resize"):
+                route_import(args)
+            args.resize = True
+            route_import(args)
+            resized = read_route(args.output.read_bytes())
+            self.assertEqual([len(section.events) for section in resized], [5, 2, 3])
+            self.assertEqual(resized[0].events[2][2], 40)
+            self.assertEqual(resized[0].lanes[0][2][0], -1.5)
+            self.assertEqual(resized[1:], edited[1:])
+
+            # Put the additional station inside the wrapped lap-boundary span.
+            rows[1], rows[2] = rows[2], rows[1]
+            rows[1]["station"], rows[2]["station"] = "1", "2"
+            args.output = work / "resized-auxiliary.ail"
+            write_table()
+            with self.assertRaisesRegex(ValueError, "do not span"):
+                route_import(args)
+            rows.insert(-1, dict(rows[-1], station="2", distance_m="5"))
+            rows[-1]["station"] = "3"
+            write_table()
+            route_import(args)
+            resized = read_route(args.output.read_bytes())
+            self.assertEqual([len(section.events) for section in resized], [5, 2, 4])
+            self.assertEqual(resized[2].events[2][2], 5)
+
+            rows[:] = [row for row in rows if (row["section"], row["station"]) != ("pit", "1")]
+            args.output = work / "shorter-pit.ail"
+            write_table()
+            route_import(args)
+            shortened = read_route(args.output.read_bytes())
+            self.assertEqual(shortened[1].events, resized[1].events[:1])
+            self.assertEqual(shortened[1].lanes, tuple(lane[:1] for lane in resized[1].lanes))
 
     def test_scene_append_links_a_new_root_and_serializes_authored_positions(self):
         base, root, leaf, packet_at = 0x200000, 0x10, 0x30, 0xa0
@@ -199,6 +238,24 @@ class ModAssetTests(unittest.TestCase):
         self.assertEqual(first.read(edited), replacement)
         self.assertNotEqual(second.offset, find_member(package, "two.dat")[0].offset)
         self.assertEqual(second.read(edited), b"BBBB")
+
+    def test_growing_nested_jpak_reuses_capacity_in_its_outer_package(self):
+        inner = self.package()[:196]
+        outer = bytearray(self.package())
+        struct.pack_into("<III", outer, 36, len(inner), 128, len(inner))
+        struct.pack_into("<I", outer, 72, 448)
+        outer[128:128 + len(inner)] = inner
+        outer[448:452] = b"KEEP"
+        replacement = bytes(range(80))
+        with self.assertRaisesRegex(ValueError, "exceeds the original package extent"):
+            replace_member(inner, ["one.dat"], replacement)
+        edited = replace_member(bytes(outer), ["one.dat", "one.dat"], replacement)
+        self.assertEqual(len(edited), len(outer))
+        self.assertEqual(find_member(edited, "two.dat")[0].read(edited), b"KEEP")
+        rebuilt = find_member(edited, "one.dat")[0].read(edited)
+        self.assertGreater(len(rebuilt), len(inner))
+        self.assertEqual(find_member(rebuilt, "one.dat")[0].read(rebuilt), replacement)
+        self.assertEqual(find_member(rebuilt, "two.dat")[0].read(rebuilt), b"BBBB")
 
     def test_compact_encoding_round_trips_across_the_ring_boundary(self):
         sample = bytes(random.Random(5).choices(range(9), k=5096)) + b"AABBAAAAABB" * 30

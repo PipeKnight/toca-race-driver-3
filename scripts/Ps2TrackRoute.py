@@ -2,7 +2,9 @@
 
 import csv
 from dataclasses import dataclass
+from itertools import groupby
 import math
+from operator import itemgetter
 import struct
 
 
@@ -98,18 +100,25 @@ def route_import(args):
     coordinates = coordinate_fields(sections)
     events = bytearray()
     points = bytearray()
+    sizes = []
     boundary = {12: [], 13: []}
     with args.csv.open(encoding="utf-8-sig", newline="") as stream:
         reader = csv.DictReader(stream)
         if tuple(reader.fieldnames or ()) != FIELDS + coordinates:
             raise ValueError("CSV columns do not match the route template")
+        groups = groupby(reader, key=itemgetter("section"))
         for section in sections:
+            label, rows = next(groups, (None, ()))
+            if label != section.label:
+                raise ValueError(f"Expected a nonempty {section.label} route section")
             lane_ids = section.lane_ids
             active = {f"{axis}{lane}" for lane in lane_ids for axis in ("x", "z")}
             lanes = [bytearray() for _ in lane_ids]
-            for station in range(len(section.events)):
-                row = next(reader, {})
-                if row.get("section") != section.label or row.get("station") != str(station) or None in row:
+            size = 0
+            for station, row in enumerate(rows):
+                if station >= 0xffff:
+                    raise ValueError(f"Too many stations in the {section.label} route section")
+                if row.get("station") != str(station) or None in row:
                     raise ValueError(f"Expected CSV row for {section.label} station {station}")
                 if any(row[field] != "" for field in coordinates if field not in active):
                     raise ValueError(f"Unexpected lane value at {section.label} station {station}")
@@ -120,16 +129,20 @@ def route_import(args):
                     boundary[flags[0]].append(station)
                 for lane_id, lane in zip(lane_ids, lanes):
                     lane.extend(POINT.pack(float(row[f"x{lane_id}"]), float(row[f"z{lane_id}"])))
+                size = station + 1
+            if not args.resize and size != len(section.events):
+                raise ValueError(f"Station count changed in {section.label}. Use --resize for intentional changes")
+            sizes.append(size)
             points.extend(b"".join(lanes))
-        if next(reader, None) is not None:
+        if next(groups, None) is not None:
             raise ValueError("CSV has extra route stations")
     starts, ends = boundary[12], boundary[13]
     if len(starts) != 1 or len(ends) != 1:
         raise ValueError("Main route requires one code 12 and one code 13 lap-boundary marker")
-    count = (ends[0] - starts[0]) % len(sections[0].events) + 1
-    if count != len(sections[2].events):
+    count = (ends[0] - starts[0]) % sizes[0] + 1
+    if count != sizes[2]:
         raise ValueError("Lap-boundary markers do not span the auxiliary route's station count")
-    header = b"".join(SECTION.pack(len(section.events), section.mask, section.loop) for section in sections)
+    header = b"".join(SECTION.pack(size, section.mask, section.loop) for size, section in zip(sizes, sections))
     result = MAGIC + header + events + points
     read_route(result)
     with args.output.open("xb") as stream:

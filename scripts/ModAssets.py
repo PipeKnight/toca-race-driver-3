@@ -88,11 +88,11 @@ def find_member(archive, name):
     return matches[0], directory
 
 
-def replace_member(archive, chain, replacement):
+def replace_member(archive, chain, replacement, *, nested=False):
     member, directory = find_member(archive, chain[0])
     original = member.read(archive)
     if len(chain) > 1:
-        replacement = replace_member(original, chain[1:], replacement)
+        replacement = replace_member(original, chain[1:], replacement, nested=True)
     if replacement == original:
         return archive
     end = member.offset + member.stored
@@ -107,8 +107,11 @@ def replace_member(archive, chain, replacement):
         payload = replacement
     if len(payload) > member.stored:
         if member.jpak:
-            return bytes(repack_jpak(archive, len(directory), {member.name.encode("ascii"): replacement},
-                                     len(archive), compressor=lambda _: payload))
+            # A nested JPAK gets its length from the enclosing member entry.
+            extent = None if nested else len(archive)
+            rebuilt = repack_jpak(archive, len(directory), {member.name.encode("ascii"): replacement},
+                                  extent, compressor=lambda _: payload)
+            return bytes(rebuilt).ljust(len(archive), b"\0")
         raise ValueError(f"{member.name} needs {len(payload)} stored bytes but has room for {member.stored}")
     output = bytearray(archive)
     output[member.offset:end] = payload + bytes(member.stored - len(payload))
@@ -282,6 +285,7 @@ def main():
             command.add_argument("--offset-y", type=float, default=0, help="shift authored vertices vertically in metres")
         if name == "route-import":
             command.add_argument("--csv", type=Path, required=True, help="station CSV from route-export")
+            command.add_argument("--resize", action="store_true", help="allow changing the station count of each section")
         command.set_defaults(run=handler)
     args = parser.parse_args()
     try:

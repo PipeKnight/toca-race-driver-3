@@ -14,7 +14,7 @@ python scripts/ModAssets.py list --disc $disc --package oschersleben-track
 python scripts/ModAssets.py list --disc $disc --package dtm-cars --inside dtmx_00.big
 ```
 
-Each listing shows the member's package-relative offset, disk size, decoded size, and encoding. `extract` returns the decoded file and prints its SHA-256. Use `--inside` once for each container between the outer package and the file. `replace` writes a new copy of the outer package with the same total length. If a JPAK member outgrows its slot, the tool packs its entries within the original package extent and updates their offsets. A BIGF edit must fit the original member slot. Use a new output filename for every command.
+Each listing shows the member's package-relative offset, disk size, decoded size, and encoding. `extract` returns the decoded file and prints its SHA-256. Use `--inside` once for each container between the outer package and the file. `replace` writes a new copy of the outer package with the same total length. A nested JPAK can grow when its enclosing member or outer JPAK has room. The tool updates offsets and lengths when it repacks the entries. A BIGF edit must fit the original member slot. Use a new output filename for every command.
 
 | Container | What to look for |
 | --- | --- |
@@ -58,7 +58,7 @@ python scripts/ModAssets.py route-obj "$work\roa.ail" "$work\roa-route.obj"
 
 `route-export` writes one CSV row per station for the main, pit, and auxiliary sections. The `xN` and `zN` columns hold metre coordinates for lane bit `N`. Leave a lane blank when it is absent from that section. The four event bytes are `code`, `tag`, `argument`, and `reserved`. On the verified circuits, main-route code `10` marks a checkpoint and its tag identifies it. To move a checkpoint to a nearby unused station, move all four event bytes together and copy the unused station's event bytes into the vacated row. Keep the order of the checkpoints as encountered by the car.
 
-Main-route codes `12` and `13` delimit the span represented by the auxiliary route. The importer checks the number of stations across that span, including both endpoints and any wrap across the start line. It retains the template's station count, lane mask, and loop flag for every section. Keep the distances and normals consistent with the edited lane positions. Small lateral edits can reuse the template distances. A new route shape needs its own distances, normals, and matching collision.
+Main-route codes `12` and `13` delimit the span represented by the auxiliary route. The importer checks the number of stations across that span, including both endpoints and any wrap across the start line. It retains the template's lane mask and loop flag for every section. Keep the distances and normals consistent with the edited lane positions. Small lateral edits can reuse the template distances. A new route shape needs its own distances, normals, and matching collision.
 
 Set `$addon` to the [expanded add-on](ps2-disc-and-archives.md#add-a1-ring-gp-and-short) with A1-Ring Short in `tqa3`.
 
@@ -74,6 +74,16 @@ Copy-Item -LiteralPath "$work\TRACK.JPK" -Destination "$trial\tqa3\TRACK.JPK"
 ```
 
 Test the edited route in both Time Trial and a race with opponents. [PS2 route format](ps2-disc-and-archives.md#editing-ps2-track-routes)
+
+#### Add or remove route stations
+
+Use `route-import --resize` when the table has a different number of rows. Keep the three sections in order and number each one consecutively from zero. On a straight, insert an ordinary station between two stations with code `0`. Interpolate the X/Z pair for each present lane and its distance, and use a unit X/Z normal. Keep event bytes on their intended stations. An edit between code `12` and `13` also needs a corresponding row change in the auxiliary section. Those rows describe the same span through the start line, with their own lane positions.
+
+```powershell
+python scripts/ModAssets.py route-import "$work\short.ail" "$work\short-resized.ail" --csv "$work\short-resized.csv" --resize
+```
+
+Then replace `osc1.ail` in the trial package with `short-resized.ail` as above. If the outer `TRACK.JPK` runs out of room, reduce the route or use a compatible package with sufficient space. Check the grid placement, both sides of the start line, AI traffic, and a timed finish after resizing a route.
 
 ### Test a track change on Windows
 
