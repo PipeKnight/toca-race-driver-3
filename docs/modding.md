@@ -2,6 +2,13 @@
 
 This guide uses the North American PS2 disc `SLUS-21182` v1.02 and the portable recompilation. Start with your own disc files. A track and a car each load several related resources, so keep the extracted package and its companion files together until you know which member you want to change. [Reference disc](ps2-disc-and-archives.md#reference-disc)
 
+| I want to… | Start here |
+| --- | --- |
+| Import a Race Driver 2 circuit | Build the local donor pack from both PS2 discs and install it in Free Race. [Road America import](ps2-disc-and-archives.md#play-road-america-from-your-own-discs) |
+| Build an original circuit | Start with the working Foundry Oval slot, then replace the road mesh, collision, and AI route together. [Foundry Oval example](#build-and-play-foundry-oval) |
+| Put my own geometry on a working car | Export one detail level of the DTM car as OBJ, author the replacement faces, and test an overlay. [DTM model workflow](ps2-dtm-models.md#replace-selected-mesh-packets-from-obj) |
+| Test a new car variant alongside the original cars | Put two edited meshes into the additional DTM variant and drive it in the introductory Oschersleben race. [Additional DTM variant](#test-an-additional-dtm-variant) |
+
 ## Inspect and extract files
 
 Run these PowerShell examples from the repository root with Python 3.10 or later. Set `$disc` to a mounted or extracted RD3 DVD directory containing `RDH.DIR` and `RDH_*.HUG`. The tool verifies the directory fingerprint before reading any of the known disc ranges. You can also open an extracted `BIGF` or `JPAK` file read-only through `--file`.
@@ -161,9 +168,19 @@ For another circuit, work on a copy of this pack and edit its `tqa4` resources. 
 
 Start with a DTM car. The verified PS2 archive for the class is `CARDATA\DTMX\DTMX.JPK`. Its directory includes the Audi A4 `.mdl` and `.msh` pair, textures, `CarParts.big`, and variant packages such as `dtmx_00.big`. The two model files are a paired PS2 format. The [RD3_BD7sTools](https://github.com/BuilderDemo7/RD3_BD7sTools) project targets conversion from PSP track `.p3d` to PC `.px` and is still under development. The ZModeler Race Driver filter documents the desktop mesh workflow and the shared part map layout. [PS2 comparison](ps2-disc-and-archives.md#stock-ps2-dtm-models-and-oschersleben-collision)
 
+| File or entry | Role in the PS2 DTM car path |
+| --- | --- |
+| `CarUID` in `events.big` | A car variant and a type ID separated by `/`, for example `dtmx_13/CKL`. The driver roster supplies AI entries. `CareerOfferCarID` supplies the car offered to the player for the introductory DTM event. |
+| `Cartype.big` | Vehicle type records. `StringID` gives the ID used after `/` in the event. The Mercedes record uses `CKL`. The records also give display names, a manufacturer ID, and a Hall of Fame index. |
+| `lookup.ini` | Maps a variant to its model basename. DTM variants with different liveries can point to the same geometry. |
+| `.mdl`, `.msh`, `_HI.MSH` | The model sections and VIF vertex streams. The Mercedes uses a separate high-detail mesh plus four detail levels in the class mesh. |
+| Variant `.big` and `.tex` | The variant package includes mechanics, effects, `part.map`, `type.ini`, and damage settings. Texture files supply the livery and other materials. |
+
 ### Inspect a car part map
 
 ```powershell
+python scripts/ModAssets.py extract --disc $disc --package car-types MercCDTM.ini "$work\mercedes-type.ini"
+python scripts/ModAssets.py extract --disc $disc --package dtm-cars lookup.ini "$work\dtm-lookup.ini"
 python scripts/ModAssets.py extract --disc $disc --package dtm-cars DTM_A4.mdl "$work\DTM_A4.mdl"
 python scripts/ModAssets.py extract --disc $disc --package dtm-cars DTM_A4.msh "$work\DTM_A4.msh"
 python scripts/ModAssets.py extract --disc $disc --package dtm-cars --inside dtmx_00.big part.map "$work\part.map"
@@ -180,3 +197,17 @@ python scripts/ModAssets.py replace --disc $disc --package dtm-cars --inside dtm
 Run an unedited JSON round trip first. The rebuilt map should have the same SHA-256 as the extracted file. After an edit, run `model-info` with `--part-map` to verify the referenced indices. Extract the member again from `DTMX-test.JPK` and compare it to the intended bytes. A one-entry test changed the nested map, preserved the 5,145,344-byte outer extent, and matched every other decoded member at both levels. To load the rebuilt package, give it the name `DTMX.JPK` in a `--dtm-mod` directory. [DTM model and overlay guide](ps2-dtm-models.md)
 
 The DTM model and overlay guide covers the `.mdl`/`.msh` structure, OBJ exports by detail level, and two ways to edit a mesh. Before replacing a complete model, match the textures, part identifiers, and damage attachments. Test wheel and suspension movement, body panels, cockpit views, sound, and LODs before creating a permanent car slot. [DTM model and overlay guide](ps2-dtm-models.md)
+
+### Test an additional DTM variant
+
+1. Extract the Mercedes class and high-detail meshes. Edit each with the DTM mesh workflow, using the original as a template for packet capacity, materials, and local coordinates. For a first test, give the high-detail mesh one visible edit and copy the class mesh unchanged.
+2. Build the add-on in a new directory. It adds `dtmx_20/CKL` and a separate mesh named `QA_Touring` inside a copy of the DTM class package. The new entry reuses the `CKL` vehicle type and the Mercedes template's mechanics, livery, and part maps. It leaves the original DTM entries in the package for the opponents.
+3. Open a portable launcher built with the DTM variant backend patch. Start with an empty data directory and take the introductory Oschersleben race. That event assigns the new car to the player. Check the chase, bonnet, and cockpit cameras, then compare the other DTM cars with a stock run. The ordinary DTM Free Race car selection and progression lists retain their stock entries.
+
+```powershell
+$mod = "$work\dtm-variant"
+python scripts/BuildDtmVariant.py --disc $disc --mesh "$work\mercedes-class-edited.msh" --hi-mesh "$work\mercedes-high-edited.msh" --output $mod
+.\TocaRecomp.exe --disc 'D:\Games\TOCA Race Driver 3.iso' --dtm-mod $mod --data-dir "$work\variant-player"
+```
+
+For this race, the game reads the whole field's model lookup from one class package. A package with just the new variant can load the player's model and then stall while resolving the first opponent. The expanded package carries both the existing DTM models and the new pair. The Windows runtime redirects the new files to verified empty sectors within `RDH_2.HUG` at read time. The disc stays read-only. The add-on files contain game assets copied locally from the supplied disc. Share the builder and your original source geometry.
