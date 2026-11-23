@@ -351,6 +351,14 @@ def triangle_strip(faces):
     return strip
 
 
+def write_mesh_strip(data, packet, strip):
+    strip.extend([strip[-1]] * (packet.count - len(strip)))
+    for vertex, (point, uv, normal) in enumerate(strip):
+        VERTEX.pack_into(data, packet.position + vertex * VERTEX.size, *point)
+        UV.pack_into(data, packet.uv + vertex * UV.size, *uv)
+        VERTEX.pack_into(data, packet.normal + vertex * VERTEX.size, *normal)
+
+
 def mesh_replace(args):
     data = bytearray(args.mesh.read_bytes())
     _, packets = mesh_packets(data)
@@ -361,11 +369,45 @@ def mesh_replace(args):
         strip = triangle_strip(faces)
         if len(strip) > packet.count:
             raise ValueError(f"Packet {index} needs {len(strip)} strip vertices and has room for {packet.count}")
-        strip.extend([strip[-1]] * (packet.count - len(strip)))
-        for vertex, (point, uv, normal) in enumerate(strip):
-            VERTEX.pack_into(data, packet.position + vertex * VERTEX.size, *point)
-            VERTEX.pack_into(data, packet.normal + vertex * VERTEX.size, *normal)
-            UV.pack_into(data, packet.uv + vertex * UV.size, *uv)
+        write_mesh_strip(data, packet, strip)
+    with args.output.open("xb") as stream:
+        stream.write(data)
+
+
+def mesh_copy_strip(args):
+    if any(not math.isfinite(value) or value <= 0 for value in args.scale):
+        raise ValueError("Strip scale values must be finite and positive")
+    if not all(map(math.isfinite, args.offset)):
+        raise ValueError("Strip translation must be finite")
+    source = args.source.read_bytes()
+    data = bytearray(args.mesh.read_bytes())
+    _, source_packets = mesh_packets(source)
+    _, target_packets = mesh_packets(data)
+    if not 0 <= args.from_packet < len(source_packets):
+        raise ValueError(f"Source packet {args.from_packet} is out of range")
+    if not 0 <= args.to_packet < len(target_packets):
+        raise ValueError(f"Target packet {args.to_packet} is out of range")
+    donor = source_packets[args.from_packet]
+    target = target_packets[args.to_packet]
+    if not donor.triangle_strip or not target.triangle_strip:
+        raise ValueError("Both mesh packets must use a supported triangle strip")
+    if donor.count > target.count:
+        raise ValueError(f"Source strip has {donor.count} vertices but target packet has room for {target.count}")
+
+    smallest_scale = min(args.scale)
+    normal_scale = tuple(smallest_scale / scale for scale in args.scale)
+    strip = []
+    for vertex in range(donor.count):
+        original = VERTEX.unpack_from(source, donor.position + vertex * VERTEX.size)
+        point = tuple(value * scale + offset for value, scale, offset in zip(original, args.scale, args.offset))
+        uv = UV.unpack_from(source, donor.uv + vertex * UV.size)
+        normal = VERTEX.unpack_from(source, donor.normal + vertex * VERTEX.size)
+        if not all(map(math.isfinite, (*point, *uv, *normal))):
+            raise ValueError(f"Non-finite mesh attributes at source vertex {vertex}")
+        if normal_scale != (1, 1, 1) and any(normal):
+            normal = unit_vector(tuple(value * scale for value, scale in zip(normal, normal_scale)))
+        strip.append((point, uv, normal))
+    write_mesh_strip(data, target, strip)
     with args.output.open("xb") as stream:
         stream.write(data)
 
@@ -401,6 +443,17 @@ def main():
     replace.add_argument("obj", type=Path, help="triangles with UVs in packet_N groups")
     replace.add_argument("output", type=Path)
     replace.set_defaults(run=mesh_replace)
+    copy = commands.add_parser("mesh-copy-strip", help="copy an existing PS2 car triangle strip into another mesh")
+    copy.add_argument("source", type=Path, help="donor mesh")
+    copy.add_argument("mesh", type=Path, help="target template mesh")
+    copy.add_argument("output", type=Path, help="new mesh file")
+    copy.add_argument("--from-packet", type=int, required=True, help="zero-based donor packet index")
+    copy.add_argument("--to-packet", type=int, required=True, help="zero-based target packet index")
+    copy.add_argument("--scale", type=float, nargs=3, default=(1, 1, 1), metavar=("X", "Y", "Z"),
+                      help="scale donor positions in the target axes before applying the offset")
+    copy.add_argument("--offset", type=float, nargs=3, default=(0, 0, 0), metavar=("X", "Y", "Z"),
+                      help="donor translation in the target mesh's local coordinates")
+    copy.set_defaults(run=mesh_copy_strip)
     args = parser.parse_args()
     try:
         args.run(args)

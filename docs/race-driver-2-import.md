@@ -1,6 +1,6 @@
 # Import from Race Driver 2 on PS2
 
-Use your own PS2 copies of Race Driver 2 `SLES-52638` v1.02 and TOCA Race Driver 3 `SLUS-21182` v1.02. This guide covers Road America and both A1-Ring layouts through a verified circuit importer. The car workflow reaches donor asset extraction and OBJ export. A driveable conversion of a complete RD2 car is still in development.
+Use your own PS2 copies of Race Driver 2 `SLES-52638` v1.02 and TOCA Race Driver 3 `SLUS-21182` v1.02. This guide covers Road America and both A1-Ring layouts through a verified circuit importer. The car example fits a DB5 roof strip and copies the donor's body texture pages onto the QA Touring test variant. A complete DB5 conversion remains in development.
 
 ## Convert Road America and A1-Ring
 
@@ -47,8 +47,29 @@ python scripts/Ps2CarModel.py mesh-preview "$car\db5.msh" "$car\db5-lod0.obj" --
 
 Open the OBJ in an editor. With the reference disc, LOD 0 contains 574 mesh packets and 4,938 exported triangles. Use `--lod 1` through `--lod 4` and distinct filenames for the lower detail levels. This class stores all five levels in one `.msh`. The supported RD3 Mercedes template supplies the highest level separately. Some RD2 archives contain a separate `car.p3d`; this example uses the PS2 class model pair. [RD3 model pair and packet layout](ps2-dtm-models.md#find-packets-by-detail-level)
 
-## Prepare the donor model for an RD3 car slot
+## Build the DB5 roof and livery sample
 
-For a first experiment, export the RD3 Mercedes template and choose one visible body surface. Use the RD2 OBJ as donor geometry, align the selected part to the RD3 template in local coordinates, triangulate it, and keep a UV coordinate at every corner. Export the edited faces in the target Mercedes `packet_N` groups. Fit each group to the target packet's vertex capacity and test the high-detail and class meshes separately. These are the same authoring steps used for the verified QA Touring variant. [Mesh replacement commands](ps2-dtm-models.md#replace-selected-mesh-packets-from-obj) · [Build the RD3 variant](modding.md#test-an-additional-dtm-variant)
+The following commands use the DB5 files extracted above and the stock PS2 Mercedes DTM model as a target. `mesh-copy-strip` takes a donor strip in its original order, fits it in the target packet, and writes the positions, UVs, and normals. The example places DB5 packet 126 over the centre of the QA Touring roof using high-detail packet 135. This placement makes the transferred strip easy to identify in the selector and on track.
+
+```powershell
+python scripts/ModAssets.py extract-resource --disc $rd3 --package dtm-mercedes-hi "$work\mercedes-hi.msh"
+python scripts/ModAssets.py extract --disc $rd3 --package dtm-cars DTM_C_Klasse.msh "$work\mercedes-class.msh"
+python scripts/Ps2CarModel.py mesh-copy-strip "$car\db5.msh" "$work\mercedes-hi.msh" "$work\db5-roof-hi.msh" `
+    --from-packet 126 --to-packet 135 --scale 2.1 1 2 --offset 0 0.03 0.38
+$carPack = Join-Path $work 'DB5 Roof Test'
+python scripts/BuildDtmVariant.py --disc $rd3 --mesh "$work\mercedes-class.msh" --hi-mesh "$work\db5-roof-hi.msh" `
+    --livery-class "$car\vc_2.tex" --livery-hi "$car\vc_2_hi.tex" --output $carPack
+& $launcher --disc $rd3Iso --dtm-mod $carPack --data-dir "$work\db5-test-player"
+```
+
+Take the introductory race for immediate access to the sample. On an add-on profile with DTM unlocked, select **QA Touring** in **Simulation Modes → Free Race → Touring Car → DTM**. Use a new folder for each build. Omit both livery options to keep the Mercedes livery and compare the roof on its own.
+
+The livery options copy four indexed body images and their palettes by the names' `_01` through `_04` suffixes. The builder checks that both pixel and palette uploads have matching dimensions, then preserves the RD3 layout and upload commands. Class and high-detail files must be supplied as a pair. The Mercedes still supplies the texture bindings, material effects, and all class mesh geometry. The DB5 graphics therefore follow the Mercedes UVs on the rest of the car. In a cold Windows run, all three edited roof streams and all 16 copied pixel and palette payloads matched the data found in guest RAM.
+
+The `preview.7` Direct3D 12 runner showed the sample in the Free Race selector using an isolated profile with DTM data assigned to an unlocked event. The sample completed the final lap of the introductory Oschersleben race. A replay on the standard runner matched all 484 checkpoints from frame 3250 through the post-race cutscene at frame 10500. Six matching race and cutscene captures were byte-identical.
+
+## Adapt the sample to another part
+
+Export the RD3 Mercedes template and choose a visible body surface. Match a strip by inspecting its `packet_N` group in the RD2 OBJ. `mesh-copy-strip` works when the source strip fits the target packet's vertex capacity. For changes that need to split or retriangulate a strip, align the donor OBJ to the target in local coordinates, keep a UV on every corner, and export the edited faces in the target Mercedes `packet_N` groups. Use `mesh-replace` and test the high-detail and class meshes separately. [Mesh replacement commands](ps2-dtm-models.md#replace-selected-mesh-packets-from-obj) · [Build the RD3 variant](modding.md#test-an-additional-dtm-variant)
 
 A complete conversion additionally needs the donor material and texture mapping, every detail level, the RD3 part map, wheel and suspension attachments, damage, and vehicle mechanics. The sample RD2 model's part table differs from the layout checked by the RD3 tool. A complete port needs in-game checks for the selector, other cars on the grid, cameras, LOD transitions, a classified finish, and damage.
