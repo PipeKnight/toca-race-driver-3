@@ -112,6 +112,8 @@ An Oschersleben traffic check with the player in a stock Vectra showed the AI dr
 
 A later matched traffic test sampled all four DB5 wheel matrices from VU memory. Relative to the chassis, the wheel translations changed by 0.8–1.3 mm across adjacent frames at the LOD 1 → 2 transition, and by 1.2–2.2 mm over the twelve sampled frames spanning LOD 2 → 3. This checks for a visible attachment jump in the undamaged AI car; it does not cover wheel damage, player steering through the same transitions, or the combined LOD 4 silhouette.
 
+The exterior renderer draws a group of DB5 door strips that originally used an interior trim page. Rebinding the page and UVs was not enough: those strips still had inward-facing normals and the panel stayed nearly black in the selector. The builder now projects normalized outward paint normals from the same door at LODs 0–3. A matched capture confirmed the lighting change. Only the high-detail and class mesh streams changed; positions, hinges, cockpit geometry, and the donor texture files stayed intact.
+
 ### Find the donor mechanics
 
 The `vc_2` mechanics package is at `RD2_1.HUG` sector 790877 and occupies six sectors. Its `num.ini` identifies the variant. Both mechanics CSVs identify the Aston Martin DB5 and the damage file identifies `db5`. Extract these to inspect independent copies of the standard and simulation settings.

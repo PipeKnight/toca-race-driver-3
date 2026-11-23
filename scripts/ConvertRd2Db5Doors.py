@@ -1,5 +1,6 @@
 """Supply paint materials for the DB5 door strips drawn by RD3."""
 
+import math
 import struct
 
 from BuildTrackGeometryOverlay import read_word, vif_commands
@@ -14,11 +15,25 @@ BODY_TEX0 = (0x2007e0062131341c, 0x2007f0062131398e, 0x2000000621310000)
 CLASS_BODY_TEX0 = (0x2007e005e131341c, 0x2007f005e131398e, 0x20000005e1310000)
 
 
-def paint_uv(y, z, samples):
-    nearest = sorted(((sy - y)**2 + (sz - z)**2, uv) for (_, sy, sz), uv in samples)[:4]
+def blend_paint(y, z, samples, size):
+    nearest = sorted(((sy - y)**2 + (sz - z)**2, value) for (_, sy, sz), value in samples)[:4]
+    if not nearest:
+        raise ValueError("No reference samples for the DB5 door paint")
     weights = [1 / max(0.0001, distance) for distance, _ in nearest]
-    return tuple(sum(weight * uv[axis] for weight, (_, uv) in zip(weights, nearest)) / sum(weights)
-                 for axis in range(2))
+    return tuple(sum(weight * value[axis] for weight, (_, value) in zip(weights, nearest)) / sum(weights)
+                 for axis in range(size))
+
+
+def paint_uv(y, z, samples):
+    return blend_paint(y, z, samples, 2)
+
+
+def paint_normal(y, z, samples):
+    direction = blend_paint(y, z, samples, 3)
+    magnitude = math.hypot(*direction)
+    if not math.isfinite(magnitude) or magnitude < .4:
+        raise ValueError("Invalid exterior reference normals for the DB5 door paint")
+    return tuple(value / magnitude for value in direction)
 
 
 def door_streams(model, mesh, part_map, lod):
@@ -78,17 +93,23 @@ def door_streams(model, mesh, part_map, lod):
 def paint_doors(model, mesh, part_map, lods=(0,)):
     output = bytearray(mesh)
     for lod in lods:
-        for swaps, interior, paint in door_streams(model, mesh, part_map, lod):
-            samples = []
+        for side, (swaps, interior, paint) in zip((-1, 1), door_streams(model, mesh, part_map, lod), strict=True):
+            samples, normals = [], []
             for strip in paint:
-                xyz = mesh[strip.position:strip.position + VERTEX.size * strip.count]
+                xyz = tuple(VERTEX.iter_unpack(mesh[strip.position:strip.position + VERTEX.size * strip.count]))
                 uv = mesh[strip.uv:strip.uv + UV.size * strip.count]
-                samples.extend(zip(VERTEX.iter_unpack(xyz), UV.iter_unpack(uv), strict=True))
+                normal = mesh[strip.normal:strip.normal + VERTEX.size * strip.count]
+                samples.extend(zip(xyz, UV.iter_unpack(uv), strict=True))
+                # Lower-detail strips can share paint between outward faces and folded edges.
+                normals.extend((pos, n) for pos, n in zip(xyz, VERTEX.iter_unpack(normal), strict=True)
+                               if side * n[0] > .4)
             # RD3 draws this leading group in the exterior, but it names an RD2 global trim page.
+            # Rebind its paint and lighting without changing the door skin, hinge, or cockpit trim.
             for offset, tex0 in zip(swaps, CLASS_BODY_TEX0 if lod else BODY_TEX0, strict=True):
                 struct.pack_into("<Q", output, offset, tex0)
             for strip in interior:
                 for index in range(strip.count):
                     _, y, z = VERTEX.unpack_from(mesh, strip.position + VERTEX.size * index)
                     UV.pack_into(output, strip.uv + UV.size * index, *paint_uv(y, z, samples))
+                    VERTEX.pack_into(output, strip.normal + VERTEX.size * index, *paint_normal(y, z, normals))
     return bytes(output)

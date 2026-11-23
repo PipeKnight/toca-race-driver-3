@@ -1,11 +1,13 @@
-"""Regression checks for transferring door UVs without moving the door skins."""
+"""Regression checks for repainting the DB5 without moving the door skins."""
 
+import math
 import struct
 import unittest
 from unittest.mock import patch
 
 from BuildRd2Db5Variant import verify_wheel_lods
-from ConvertRd2Db5Doors import paint_uv
+from ConvertRd2Db5Doors import BODY_TEX0, UV, VERTEX, paint_doors, paint_normal, paint_uv
+from Ps2CarModel import MeshPacket
 
 
 class DoorPaintTests(unittest.TestCase):
@@ -19,6 +21,35 @@ class DoorPaintTests(unittest.TestCase):
         u, v = paint_uv(0., 1., paint)
         self.assertAlmostEqual(u, .5, places=3)
         self.assertAlmostEqual(v, .7, places=3)
+
+    def test_paint_normal_is_normalized_after_blending(self):
+        samples = (((0., -.1, 0.), (1., 0., 0.)), ((0., .1, 0.), (.6, .8, 0.)))
+        normal = paint_normal(0., 0., samples)
+        self.assertAlmostEqual(math.hypot(*normal), 1.)
+        self.assertAlmostEqual(normal[1] / normal[0], .5)
+
+    def test_rebinds_inward_trim_normals_on_both_sides_without_moving_vertices(self):
+        mesh = bytearray(320)
+        groups = []
+        for offset, side in ((0, -1), (160, 1)):
+            inner = MeshPacket(offset + 32, offset + 44, offset + 56, 1, True)
+            outer = MeshPacket(offset + 72, offset + 96, offset + 120, 2, True)
+            VERTEX.pack_into(mesh, inner.position, 0., 0., 0.)
+            VERTEX.pack_into(mesh, inner.normal, -side, 0., 0.)
+            for i, normal in enumerate(((side, 0., 0.), (-side, 0., 0.))):
+                VERTEX.pack_into(mesh, outer.position + i * 12, 0., float(i), 0.)
+                VERTEX.pack_into(mesh, outer.normal + i * 12, *normal)
+                UV.pack_into(mesh, outer.uv + i * 8, .25, .75)
+            groups.append(((offset, offset + 8, offset + 16), [inner], [outer]))
+        with patch("ConvertRd2Db5Doors.door_streams", return_value=iter(groups)):
+            repainted = paint_doors(b"", mesh, b"")
+        for side, (swaps, (inner,), (outer,)) in zip((-1, 1), groups, strict=True):
+            self.assertEqual(tuple(struct.unpack_from("<Q", repainted, at)[0] for at in swaps), BODY_TEX0)
+            self.assertEqual(UV.unpack_from(repainted, inner.uv), (.25, .75))
+            self.assertEqual(VERTEX.unpack_from(repainted, inner.normal), (side, 0., 0.))
+            self.assertEqual(repainted[inner.position:inner.normal], mesh[inner.position:inner.normal])
+            self.assertEqual(repainted[outer.position:outer.uv + 2 * UV.size],
+                             mesh[outer.position:outer.uv + 2 * UV.size])
 
 
 class WheelLodTests(unittest.TestCase):
