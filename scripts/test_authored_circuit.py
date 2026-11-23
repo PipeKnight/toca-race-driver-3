@@ -7,7 +7,7 @@ import tempfile
 import unittest
 
 from BuildAuthoredCircuit import Circuit, build_route, edges_touch, preview, validate_ribbon
-from BuildRoadAmericaMod import repack_bigf
+from BuildRoadAmericaMod import TrackEntry, read_bigf, repack_bigf, track_catalog
 from ImportRd2Car import variants
 from Ps2TrackCollision import read_triangles
 from Ps2TrackRoute import read_route
@@ -68,6 +68,17 @@ class AuthoredCircuitTests(unittest.TestCase):
         self.assertFalse(edges_touch(a, b, (4, 0), d))
         with self.assertRaisesRegex(ValueError, "pit lane folds near station 0"):
             validate_ribbon([(0, 1), (1, -1)], [(0, -1), (1, 1)], "The pit lane", closed=False)
+
+    def test_track_catalog_preserves_the_other_courses_when_adding_a_right_pit_lane(self):
+        original = b"BIGF" + bytes(0x4300 - 4)
+        stock = {b"osc1.ini": b"[Info]\r\nHOFIndex = 60\r\nPitSide = LEFT\r\n"}
+        archive = repack_bigf(original, stock, 128, 128, len(original))
+        entries = (TrackEntry("tqa4", "Foundry Oval", "0.702", 36),
+                   TrackEntry("tqa5", "Tsukuba Circuit", "2.045", 54, pit_side="RIGHT"))
+        result, _ = read_bigf(track_catalog(archive, entries, existing=1), 3)
+        self.assertEqual(result[b"osc1.ini"], stock[b"osc1.ini"])
+        self.assertIn(b"\r\nPitSide = LEFT\r\n", result[b"tqa4.ini"])
+        self.assertIn(b"\r\nPitSide = RIGHT\r\n", result[b"tqa5.ini"])
 
     def test_car_catalog_reads_variants_without_assuming_the_model_name(self):
         original = bytes(512)

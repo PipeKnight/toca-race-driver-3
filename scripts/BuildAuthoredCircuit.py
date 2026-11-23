@@ -249,7 +249,8 @@ def preview(circuit, work):
 
 
 def build(circuit, source, output, work):
-    entry = TrackEntry("tqa5", circuit.name, f"{circuit.length / 1000:.3f}", 54)
+    # The generated pit lane uses positive (rightward) lateral offsets.
+    entry = TrackEntry("tqa5", circuit.name, f"{circuit.length / 1000:.3f}", 54, pit_side="RIGHT")
     tracks = track_catalog((source / "tracks.big").read_bytes(), (entry,), existing=84)
     events = event_catalog((source / "events.big").read_bytes(), (entry,), existing_rounds=14, add_oschersleben=False)
     route = preview(circuit, work)

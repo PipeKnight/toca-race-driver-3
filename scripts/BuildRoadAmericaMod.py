@@ -2,7 +2,7 @@
 """Prepare Road America and optional A1-Ring layouts from local PS2 discs."""
 
 import argparse
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import math
 from pathlib import Path
 import re
@@ -36,6 +36,7 @@ class TrackEntry:
     name: str
     km: str
     record: int
+    pit_side: str = field(default="LEFT", kw_only=True)
 
 
 @dataclass(frozen=True)
@@ -93,10 +94,13 @@ def track_catalog(original, courses=(ROAD_AMERICA,), *, existing=80):
         member = f"{course.slot}.ini".encode("ascii")
         if course.record in indices or member in members:
             raise ValueError(f"The track or record ID for {course.name} is already in use")
+        if course.pit_side not in ("LEFT", "RIGHT"):
+            raise ValueError(f"Invalid pit side for {course.name}: {course.pit_side}")
         indices.add(course.record)
         members[member] = (
             f"[Info]\r\nTrackID = {course.slot}\r\nStage = CIRCUIT\r\nShortName = {course.name}\r\n"
-            f"FullName = {course.name}\r\nPitSide = LEFT\r\nHOFIndex = {course.record}\r\nLengthInKm = {course.km}"
+            f"FullName = {course.name}\r\nPitSide = {course.pit_side}\r\n"
+            f"HOFIndex = {course.record}\r\nLengthInKm = {course.km}"
         ).encode("ascii")
     base = max(base, (0x24 + len(members) * BIGF_ENTRY.size + 31) & ~31)
     return repack_bigf(original, members, base, max(base, 0x800), 0x4300)
