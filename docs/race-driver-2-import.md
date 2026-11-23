@@ -158,15 +158,29 @@ python scripts/Ps2CarModel.py mesh-preview "$cockpit\int_db5.msh" "$cockpit\int_
 python scripts/Ps2CockpitModel.py "$cockpit\int_dtm.px" "$cockpit\int_dtm.obj"
 ```
 
-The donor `int.ini` identifies exterior part 2 for the cockpit view and provides the camera, steering, and driver coordinates. The builder copies the donor's exterior binding into the variant's interior configuration. The Mercedes configuration referred to part 115, which the DB5 lacks. It produced horizontal rendering corruption when switching cameras. On Windows 11, using the donor binding restored an intact view when entering and leaving the cockpit camera. The current build still uses the Mercedes cockpit model and camera coordinates.
+The donor `int.ini` identifies exterior part 2 for the cockpit view and provides the camera, steering, and driver coordinates. The builder copies the donor's exterior binding into the variant's interior configuration. The Mercedes configuration referred to part 115, which the DB5 lacks. It produced horizontal rendering corruption when switching cameras. On Windows 11, using the donor binding restored an intact view when entering and leaving the cockpit camera. The default build uses the Mercedes interior model and camera coordinates.
 
 The OBJ preview exported 2,074 triangles at LOD 0 and 424 at each of LODs 1–4. Change `--lod` and the output filename to inspect the lower levels. Importing the cockpit still requires converting the RD2 mesh pair and texture container, then verifying the part binding on the added variant.
 
 The 12 stock RD3 `.px` cockpit models tested share a little-endian offset at file position `0x20` to a block containing the scene names. At offset `0x24` within that block is the byte length of the null-separated name table, which starts at `0x28`. For `int_dtm.px`, the block starts at `0xf3a0` and the table has 388 bytes. Its names include `int_main_body` and `r_door`. The table also names lights and targets. Match materials and drawable objects separately when mapping the donor cockpit.
 
-The RD3 preview command recognizes the stock triangle strips in all 12 models. It exports local positions and UVs grouped by draw section and file offset. The DTM model has 20 draw sections with 378 strips and 1,975 non-degenerate triangles. The OBJ preview omits the scene transforms, attachment animation, and material state needed to import a working cockpit.
+The RD3 preview command recognizes the stock triangle strips in all 12 models. It exports local positions and UVs grouped by draw section and file offset, and lists the corresponding scene node names in OBJ comments. The DTM model has 20 draw sections with 378 strips and 1,975 non-degenerate triangles. For example, section 0 belongs to `int_main_body`, and sections 1–4 contain the right wiper and its positions. The OBJ preview omits the scene transforms, attachment animation, and material state needed to import a working cockpit.
 
-In the stock files, each draw section has a 40-byte header followed by a VIF payload. The word immediately before the payload gives its length, a multiple of 16 bytes. The following word belongs to the next section header, or is the final zero word at the end of the file. A local Windows test replaced the first DTM draw section with the 64 strips of the DB5 main cockpit body under its own model name. The altered package reached the race with the donor geometry loaded. The test used untextured surfaces and left the remaining cockpit objects and camera settings from the DTM template.
+In the stock files, each draw section has a 40-byte header followed by a VIF payload. The word immediately before the payload gives its length, a multiple of 16 bytes. The following word belongs to the next section header, or is the final zero word at the end of the file.
+
+### Test the imported cockpit shell
+
+Use a launcher built with the variant cockpit patch from the source manifest. Create a separate development pack with `--donor-cockpit`. The sound option can be used in the same pack.
+
+```powershell
+$cockpitPack = Join-Path $work 'DB5 cockpit test'
+python scripts/BuildRd2Db5Variant.py --rd2-disc $rd2 --disc $rd3 --output $cockpitPack --donor-cockpit --donor-sound
+& $launcher --disc $rd3Iso --dtm-mod $cockpitPack --data-dir "$work\db5-cockpit-test-player"
+```
+
+This adds a separate `int_db5.px` and `int_db5.big` inside the DTM package. The model uses the 64 strips of the RD2 cockpit shell from part 119. The texture conversion reads the donor's 256 × 256 indexed atlas and samples it at 128 × 128 to fit the DTM texture allocation. The variant uses the DB5 camera coordinates and right-hand seat. In the Windows 11 Direct3D 12 test, the cockpit view showed the donor dashboard and windshield frame during the introductory Oschersleben race.
+
+The other cockpit draw sections still come from the DTM template. The steering wheel, instruments, wipers, and mirrors need their own part and material mapping before the full interior can be verified.
 
 ### Test the legacy DB5 sound banks
 

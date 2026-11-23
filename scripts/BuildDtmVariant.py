@@ -6,7 +6,9 @@ from pathlib import Path
 import struct
 
 from BuildRoadAmericaMod import EVENT_CATALOG_BYTES, EVENT_CATALOG_SECTOR, jpak_entries
-from BuildTrackCollisionOverlay import REFERENCE_DIRECTORY_HASH, SECTOR_SIZE, read_exact, verify_directory
+from BuildTrackCollisionOverlay import (
+    REFERENCE_DIRECTORY_HASH, SECTOR_SIZE, encode_lzss_compact, read_exact, verify_directory,
+)
 from ModAssets import REFERENCE_PACKAGES, find_member, replace_member
 from Ps2CarModel import mesh_packets, relocation_table
 from Ps2CarTexture import copy_body_pages
@@ -23,7 +25,7 @@ def check_mesh_layout(candidate, template, label):
         raise ValueError(f"The {label} mesh must retain the Mercedes template's packet and relocation layout")
 
 
-def append_variant(archive, mesh, livery=None):
+def append_variant(archive, mesh, livery=None, extra_members=()):
     count = struct.unpack_from("<I", archive, 8)[0]
     entries = {}
     for _, _, name, row in jpak_entries(archive, count):
@@ -48,6 +50,11 @@ def append_variant(archive, mesh, livery=None):
     lookup = lookup.rstrip() + b"\r\ndtmx_20=QA_Touring\r\n"
     _, _, lookup_metadata = entries.pop(b"lookup.ini")
     entries[b"lookup.ini"] = (lookup, len(lookup), lookup_metadata)
+    for name, template, data in extra_members:
+        if any(key.lower() == name.lower() for key in entries):
+            raise ValueError(f"The class package already contains {name.decode('ascii')}")
+        stored = encode_lzss_compact(data)
+        entries[name] = (stored if len(stored) < len(data) else data, len(data), entries[template][2])
 
     table_end = 32 + len(entries) * 32
     output = bytearray(archive[:32])

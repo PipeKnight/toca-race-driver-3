@@ -11,22 +11,50 @@ from BuildTrackGeometryOverlay import read_word, vif_commands
 from Ps2CarModel import UV, VERTEX
 
 
-def cockpit_sections(data):
+def cockpit_nodes(data):
     if len(data) < 36 or data[:4] != b"PS2M" or read_word(data, 4) != 3:
         raise ValueError("Expected a version 3 PS2M cockpit model")
     scene = read_word(data, 0x20)
     if not 36 <= scene <= len(data) - 40 or scene % 4:
         raise ValueError("Invalid PS2M scene offset")
-    offset = scene + 40 + read_word(data, scene + 0x24)
-    if offset > len(data) or offset % 4:
+    first_name = scene + 40
+    offset = first_name + read_word(data, scene + 0x24)
+    if offset > len(data) - 4 or offset % 4:
         raise ValueError("Invalid PS2M scene name table extent")
+    names = data[first_name:offset].rstrip(b"\0").decode("ascii").split("\0")
+    if read_word(data, offset) != len(names):
+        raise ValueError("The cockpit name count does not match its node table")
+    offset += 4
+    nodes = []
+    for name in names:
+        if offset > len(data) - 80:
+            raise ValueError("Truncated cockpit node")
+        count = read_word(data, offset + 76)
+        offset += 80
+        if count > (len(data) - offset) // 4:
+            raise ValueError("Truncated cockpit node draw references")
+        references = struct.unpack_from(f"<{count}I", data, offset)
+        if any(reference >= read_word(data, 8) for reference in references):
+            raise ValueError(f"Invalid draw section reference for cockpit node {name}")
+        nodes.append((name, references))
+        offset += 4 * count
+    for _ in range(read_word(data, 16)):
+        if offset > len(data) - 4:
+            raise ValueError("Truncated cockpit scene node list")
+        count = read_word(data, offset)
+        offset += 4
+        if count > (len(data) - offset) // 4:
+            raise ValueError("Invalid cockpit scene node list length")
+        offset += 4 * count
+    return offset, nodes
 
-    first = next((start for start in range(offset, len(data) - 51, 4)
-                  if read_word(data, start) == 0x6c018000 and read_word(data, start + 16) == 0xf5
-                  and struct.unpack_from("<Q", data, start + 44)[0] == 14), None)
+
+def cockpit_sections(data):
+    offset, _ = cockpit_nodes(data)
     count = read_word(data, 8)
-    if first is None or not 0 < count <= (len(data) - offset) // 40:
+    if not 0 < count <= (len(data) - offset) // 40:
         raise ValueError("Missing cockpit draw sections")
+    first = offset + 40
     sections = []
     for index in range(count):
         if (first > len(data) - 52 or read_word(data, first) != 0x6c018000
@@ -73,6 +101,10 @@ def preview(data, output):
     faces = 0
     with output.open("x", encoding="utf-8", newline="\n") as stream:
         stream.write("# RD3 PS2 cockpit strips in local mesh coordinates.\n")
+        _, nodes = cockpit_nodes(data)
+        for name, sections in nodes:
+            for section in sections:
+                stream.write(f"# Draw section {section}: {name}\n")
         for section, offset, points, texcoords in strips:
             stream.write(f"g section_{section}_strip_{offset:08x}\n")
             for label, rows in (("v", points), ("vt", texcoords)):

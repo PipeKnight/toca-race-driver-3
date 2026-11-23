@@ -1,0 +1,20 @@
+diff --git a/runtime/src/disc.cpp b/runtime/src/disc.cpp
+--- a/runtime/src/disc.cpp
++++ b/runtime/src/disc.cpp
+@@ -339,13 +339,14 @@
+             return false;
+         }
+     }
+-    if (!valid_dtm_package(mod->files[0], 61) || !valid_dtm_hi_mesh(mod->files[1]) ||
++    const auto &package = mod->files[0];
++    if ((!valid_dtm_package(package, 61) && !valid_dtm_package(package, 63)) ||
++        !valid_dtm_hi_mesh(mod->files[1]) ||
+         !valid_dtm_car_asset(mod->files[2], 0x08bd0bc0, false)) {
+         std::fprintf(stderr, "[dtm-mod] invalid variant archive or model\n");
+         return false;
+     }
+     // Older packs store this member compressed and only support the introductory race.
+-    const auto &package = mod->files[0];
+     const bool free_race = !raw_variant_member(package, dtm_variant_files[dtm_variant_menu_start].name).empty();
+     if (free_race) {
+         for (std::size_t i = dtm_variant_menu_start; i < dtm_variant_sound_start; ++i) {

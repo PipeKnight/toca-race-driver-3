@@ -13,6 +13,7 @@ from BuildRoadAmericaMod import EVENT_CATALOG_BYTES, EVENT_CATALOG_SECTOR, read_
 from BuildTrackCollisionOverlay import (
     BIGF_ENTRY, DONOR_DIRECTORY_HASH, REFERENCE_DIRECTORY_HASH, SECTOR_SIZE, read_exact, verify_directory,
 )
+from ConvertRd2Db5Cockpit import cockpit_atlas, convert_shell
 from ConvertRd2CarModel import convert_model, convert_textures
 from ModAssets import REFERENCE_PACKAGES, find_member, read_part_map, replace_member
 from Ps2CarModel import model_sections
@@ -110,7 +111,7 @@ def car_type_catalog(disc, mechanics):
     return repack_bigf(original, car_types, base, base, len(original))
 
 
-def build(rd2, rd3, donor_sound=False):
+def build(rd2, rd3, donor_sound=False, donor_cockpit=False):
     verify_directory(rd2 / "RD2.DIR", DONOR_DIRECTORY_HASH)
     verify_directory(rd3 / "RDH.DIR", REFERENCE_DIRECTORY_HASH)
     with (rd2 / "RD2_1.HUG").open("rb") as stream:
@@ -125,20 +126,36 @@ def build(rd2, rd3, donor_sound=False):
     texture = convert_textures(member(donor_models, "vc_2.tex"), member(target, "dtmx_13.tex"))
     high_texture = convert_textures(
         member(donor_models, "vc_2_hi.tex"), read_disc_range(rd3, 2, 185648, 381204))
-    archive = append_variant(target, low)
+    cockpit_members = ()
+    if donor_cockpit:
+        with (rd2 / "RD2_1.HUG").open("rb") as stream:
+            donor_interiors = read_exact(stream, 797863 * SECTOR_SIZE, 10001732)
+        cockpit_members = (
+            (b"int_db5.px", b"int_dtm.px", convert_shell(
+                member(donor_interiors, "int_db5.mdl"), member(donor_interiors, "int_db5.msh"),
+                member(target, "int_dtm.px"))),
+            (b"int_db5.big", b"int_dtm.big", cockpit_atlas(
+                member(donor_interiors, "int_db5_hi.tex"), member(target, "int_dtm.big"))),
+        )
+    archive = append_variant(target, low, extra_members=cockpit_members)
     variant = member(archive, "dtmx_20.big")
     radii = tire_radii(model, part_map)
     variant_type = member(variant, "type.ini")
     if b"type=CKL" not in variant_type:
         raise ValueError("Expected the RD3 Mercedes template type")
     exterior_section = re.compile(rb"(?ms)^\[Exterior\]\r\n.*?(?=^\[)")
-    donor_exterior = exterior_section.search(member(donor_mechanics, "int.ini"))
+    donor_interior = member(donor_mechanics, "int.ini")
+    donor_exterior = exterior_section.search(donor_interior)
     interior = member(variant, "int.ini")
     if donor_exterior is None or b"Part0=2\r\nNumParts=1\r\n" not in donor_exterior[0]:
         raise ValueError("Expected the DB5 exterior binding for the cockpit view")
     interior, replaced = exterior_section.subn(donor_exterior[0], interior)
     if replaced != 1 or read_part_map(part_map)[0][2] == 0xffffffff:
         raise ValueError("The DB5 cockpit exterior part is unavailable")
+    if donor_cockpit:
+        # Keep the donor camera and seat side in the template entry's byte budget.
+        interior = b"\r\n".join(line for line in donor_interior.splitlines()
+                               if line and not line.startswith((b"Netting=", b"DigitialDisplay="))) + b"\r\n"
     changes = {
         "part.map": part_map, "dmg.ini": member(donor_mechanics, "dmg.ini"),
         "type.ini": variant_type.replace(b"type=CKL", b"type=DB5"),
@@ -148,7 +165,7 @@ def build(rd2, rd3, donor_sound=False):
         changes[name] = driving_csv(donor_mechanics, variant, name, radii, donor_sound)
     for name, data in changes.items():
         variant = replace_member(variant, [name], data)
-    archive = repack_jpak(archive, 61, {
+    archive = repack_jpak(archive, 61 + len(cockpit_members), {
         b"dtmx_20.big": variant, b"dtmx_20.tex": texture, b"QA_Touring.mdl": model,
     }, compressor=lambda data: data)
 
@@ -176,9 +193,10 @@ def main():
     parser.add_argument("--disc", type=Path, required=True, help="extracted or mounted RD3 PS2 disc")
     parser.add_argument("--output", type=Path, required=True, help="new add-on directory")
     parser.add_argument("--donor-sound", action="store_true", help="add the experimental DB5 legacy samples")
+    parser.add_argument("--donor-cockpit", action="store_true", help="add the experimental DB5 cockpit shell")
     args = parser.parse_args()
     try:
-        result = build(args.rd2_disc, args.disc, args.donor_sound)
+        result = build(args.rd2_disc, args.disc, args.donor_sound, args.donor_cockpit)
         args.output.mkdir()
         for name, data in result.items():
             (args.output / name).write_bytes(data)
