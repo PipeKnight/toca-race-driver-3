@@ -154,11 +154,15 @@ foreach ($member in 'int_dtm.px', 'int_dtm.big') {
     python scripts/ModAssets.py extract --disc $rd3 --package cockpits $member "$cockpit\$member"
 }
 python scripts/ModAssets.py list --file "$cockpit\int_dtm.big"
+python scripts/Ps2CarModel.py mesh-preview "$cockpit\int_db5.msh" "$cockpit\int_db5_lod0.obj" --model "$cockpit\int_db5.mdl" --lod 0 --combined-lods
+python scripts/Ps2CockpitModel.py "$cockpit\int_dtm.px" "$cockpit\int_dtm.obj"
 ```
 
-The donor `int.ini` identifies exterior part 2 for the cockpit view and provides the camera, steering, and driver coordinates. Importing the cockpit still requires converting the RD2 mesh pair and texture container, then verifying the part binding on the added variant.
+The donor `int.ini` identifies exterior part 2 for the cockpit view and provides the camera, steering, and driver coordinates. The OBJ preview exported 2,074 triangles at LOD 0 and 424 at each of LODs 1–4. Change `--lod` and the output filename to inspect the lower levels. Importing the cockpit still requires converting the RD2 mesh pair and texture container, then verifying the part binding on the added variant.
 
 The 12 stock RD3 `.px` cockpit models tested share a little-endian offset at file position `0x20` to a block containing the scene names. At offset `0x24` within that block is the byte length of the null-separated name table, which starts at `0x28`. For `int_dtm.px`, the block starts at `0xf3a0` and the table has 388 bytes. Its names include `int_main_body` and `r_door`. The table also names lights and targets. Match materials and drawable objects separately when mapping the donor cockpit.
+
+The RD3 preview command recognizes the stock triangle strips in all 12 models. It exports local positions and UVs grouped by draw section and file offset. The DTM model has 20 draw sections with 378 strips and 1,975 non-degenerate triangles. The OBJ preview omits the scene transforms, attachment animation, and material state needed to import a working cockpit.
 
 ### Test the legacy DB5 sound banks
 
