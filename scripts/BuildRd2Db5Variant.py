@@ -131,9 +131,18 @@ def build(rd2, rd3, donor_sound=False):
     variant_type = member(variant, "type.ini")
     if b"type=CKL" not in variant_type:
         raise ValueError("Expected the RD3 Mercedes template type")
+    exterior_section = re.compile(rb"(?ms)^\[Exterior\]\r\n.*?(?=^\[)")
+    donor_exterior = exterior_section.search(member(donor_mechanics, "int.ini"))
+    interior = member(variant, "int.ini")
+    if donor_exterior is None or b"Part0=2\r\nNumParts=1\r\n" not in donor_exterior[0]:
+        raise ValueError("Expected the DB5 exterior binding for the cockpit view")
+    interior, replaced = exterior_section.subn(donor_exterior[0], interior)
+    if replaced != 1 or read_part_map(part_map)[0][2] == 0xffffffff:
+        raise ValueError("The DB5 cockpit exterior part is unavailable")
     changes = {
         "part.map": part_map, "dmg.ini": member(donor_mechanics, "dmg.ini"),
         "type.ini": variant_type.replace(b"type=CKL", b"type=DB5"),
+        "int.ini": interior,
     }
     for name in ("Mech.csv", "SimMech.csv"):
         changes[name] = driving_csv(donor_mechanics, variant, name, radii, donor_sound)

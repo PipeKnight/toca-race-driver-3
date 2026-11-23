@@ -158,7 +158,9 @@ python scripts/Ps2CarModel.py mesh-preview "$cockpit\int_db5.msh" "$cockpit\int_
 python scripts/Ps2CockpitModel.py "$cockpit\int_dtm.px" "$cockpit\int_dtm.obj"
 ```
 
-The donor `int.ini` identifies exterior part 2 for the cockpit view and provides the camera, steering, and driver coordinates. The OBJ preview exported 2,074 triangles at LOD 0 and 424 at each of LODs 1–4. Change `--lod` and the output filename to inspect the lower levels. Importing the cockpit still requires converting the RD2 mesh pair and texture container, then verifying the part binding on the added variant.
+The donor `int.ini` identifies exterior part 2 for the cockpit view and provides the camera, steering, and driver coordinates. The builder copies the donor's exterior binding into the variant's interior configuration. The Mercedes configuration referred to part 115, which the DB5 lacks. It produced horizontal rendering corruption when switching cameras. On Windows 11, using the donor binding restored an intact view when entering and leaving the cockpit camera. The current build still uses the Mercedes cockpit model and camera coordinates.
+
+The OBJ preview exported 2,074 triangles at LOD 0 and 424 at each of LODs 1–4. Change `--lod` and the output filename to inspect the lower levels. Importing the cockpit still requires converting the RD2 mesh pair and texture container, then verifying the part binding on the added variant.
 
 The 12 stock RD3 `.px` cockpit models tested share a little-endian offset at file position `0x20` to a block containing the scene names. At offset `0x24` within that block is the byte length of the null-separated name table, which starts at `0x28`. For `int_dtm.px`, the block starts at `0xf3a0` and the table has 388 bytes. Its names include `int_main_body` and `r_door`. The table also names lights and targets. Match materials and drawable objects separately when mapping the donor cockpit.
 
