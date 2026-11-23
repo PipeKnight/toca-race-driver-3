@@ -1,0 +1,127 @@
+diff --git a/runtime/include/ps2/disc.hpp b/runtime/include/ps2/disc.hpp
+--- a/runtime/include/ps2/disc.hpp
++++ b/runtime/include/ps2/disc.hpp
+@@ -35,6 +35,7 @@
+ void set_dtm_mod_directory(const std::string &folder);
+ bool road_america_enabled();
+ void road_america_path(std::uint32_t address);
+ bool dtm_variant_uses_legacy_sound(std::uint32_t mechanics_name);
++void update_db5_gauges(std::uint64_t frame);
+ bool dtm_variant_record(std::uint32_t filename, std::uint32_t record);
+ std::uint32_t road_america_member(std::uint32_t address, std::uint32_t scratch);
+diff --git a/runtime/src/disc.cpp b/runtime/src/disc.cpp
+--- a/runtime/src/disc.cpp
++++ b/runtime/src/disc.cpp
+@@ -11,7 +11,9 @@
+ #include <algorithm>
+ #include <array>
+ #include <atomic>
++#include <bit>
+ #include <cctype>
++#include <cmath>
+ #include <cstdio>
+ #include <cstring>
+ #include <map>
+@@ -227,6 +229,9 @@ struct DtmVariant {
+     std::array<std::vector<std::uint8_t>, dtm_variant_files.size()> files;
+     std::array<std::uint32_t, dtm_variant_files.size()> sectors{};
+     std::vector<std::uint8_t> events;
+     std::uint32_t event_archive_sector = 0;
++    bool db5_dials = false;
++    std::uint64_t previous_gauge_frame = 0;
++    std::array<std::array<std::uint32_t, 4>, 2> gauge_streams{};
+ };
+ std::unique_ptr<DtmVariant> g_dtm_variant;
+@@ -429,6 +434,19 @@ bool prepare_dtm_variant(const Entry &archive, const std::filesystem::path &root)
+         std::fprintf(stderr, "[dtm-mod] invalid DB5 shadow\n");
+         return false;
+     }
++    constexpr std::string_view dial_version = "DB5DIALS 1\r\n";
++    const auto dial_path = root / "db5-dials.ini";
++    mod->db5_dials = std::filesystem::exists(dial_path, file_error);
++    if (mod->db5_dials || file_error) {
++        std::vector<std::uint8_t> dial_config;
++        if (file_error || !has_type || u32(package.data() + 8) != 63 ||
++            !load_dtm_variant_file(dial_path, dial_config, dial_version.size(), dial_version.size()) ||
++            std::memcmp(dial_config.data(), dial_version.data(), dial_version.size())) {
++            std::fprintf(stderr, "[dtm-mod] invalid DB5 instrument configuration\n");
++            return false;
++        }
++    }
++
+     auto relative = dtm_variant_first_sector;
+     for (std::size_t i = 0; i < mod->files.size(); ++i) {
+         if (mod->files[i].empty()) continue;
+@@ -776,6 +794,61 @@ bool dtm_variant_record(std::uint32_t filename, std::uint32_t record) {
+     return false;
+ }
+ 
++void update_db5_gauges(std::uint64_t frame) {
++    if (!g_dtm_variant || !g_dtm_variant->db5_dials) return;
++    auto &mod = *g_dtm_variant;
++    // The generated PS2M stores the identifiers as VIF NOP arguments. Only touch
++    // aligned packets whose following command unpacks exactly three needle vertices.
++    constexpr std::array<std::uint32_t, 2> kinds{0x5053, 0x5052};
++    constexpr std::array<float, 2> center{.252f, .432f};
++    constexpr std::uint32_t vertex_offset = 220;
++    const auto valid = [](std::uint32_t at, std::uint32_t kind) {
++        return at && !(at & 3u) && at <= kRamSize - vertex_offset - 36 &&
++               ld32(at) == 0x4244 && ld32(at + 4) == 0x3535 && ld32(at + 8) == kind &&
++               ld32(at + vertex_offset - 4) == 0x6803010au;
++    };
++    const bool missing =
++        !valid(mod.gauge_streams[0][0], kinds[0]) || !valid(mod.gauge_streams[1][0], kinds[1]);
++    if (frame <= mod.previous_gauge_frame || frame % 600 == 0 || (missing && frame % 120 == 0)) {
++        for (auto &group : mod.gauge_streams) group.fill(0);
++        const auto *end = g_ram + kRamSize - vertex_offset - 36;
++        const auto *at = g_ram;
++        std::array<std::size_t, 2> used{};
++        while (at < end) {
++            const auto *match = static_cast<const std::uint8_t *>(std::memchr(at, 0x44, end - at));
++            if (!match) break;
++            const auto address = static_cast<std::uint32_t>(match - g_ram);
++            for (std::size_t i = 0; i < kinds.size(); ++i) {
++                if (used[i] < mod.gauge_streams[i].size() && valid(address, kinds[i]))
++                    mod.gauge_streams[i][used[i]++] = address;
++            }
++            if (used[0] == mod.gauge_streams[0].size() && used[1] == mod.gauge_streams[1].size()) break;
++            at = match + 1;
++        }
++    }
++    mod.previous_gauge_frame = frame;
++
++    // SLUS-21182 v1.02 publishes the active speed in m/s and the engine rev fraction.
++    // The speedometer spans 160 mph; the tachometer spans the game's normalized rev range.
++    const float speed = std::bit_cast<float>(ld32(0x005f49d4u));
++    const float revs = std::bit_cast<float>(ld32(0x0057259cu));
++    const std::array<float, 2> values{speed * (2.236936f / 160.f), revs};
++    for (std::size_t i = 0; i < values.size(); ++i) {
++        if (!std::isfinite(values[i]) || values[i] < -.025f || values[i] > 1.5f) continue;
++        const float angle = 3.926990817f - 4.71238898f * std::clamp(values[i], 0.f, 1.f);
++        const float x = std::cos(angle), y = std::sin(angle);
++        const float vertices[9] = {
++            center[i] - y * .0022f, .81f + x * .0022f, .157f,
++            center[i] + y * .0022f, .81f - x * .0022f, .157f,
++            center[i] + x * .0504f, .81f + y * .0504f, .157f,
++        };
++        for (const auto address : mod.gauge_streams[i]) {
++            if (valid(address, kinds[i]))
++                std::memcpy(g_ram + address + vertex_offset, vertices, sizeof(vertices));
++        }
++    }
++}
++
+ bool is_open() { return static_cast<bool>(g_reader); }
+ 
+ void set_road_america_directory(const std::string &folder) { g_road_america_directory = folder; }
+diff --git a/runtime/src/system.cpp b/runtime/src/system.cpp
+--- a/runtime/src/system.cpp
++++ b/runtime/src/system.cpp
+@@ -383,6 +383,7 @@ void vblank() {
+     latch_pads();
+     quick::frame_check();
+     apply_patches(false);
++    disc::update_db5_gauges(g_frames);
+     track_words();
+     ee::live::frame_tick();   // code windows that settled are translated in the background, finished libraries come in here (docs/gvz.md)
+     if (g_options.on_vblank) g_options.on_vblank();

@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from BuildTrackGeometryOverlay import read_word
 from ConvertRd2Db5Cockpit import db5_draw_parts, replace_draw_strips
 from Ps2CarModel import UV, VERTEX
-from Ps2CockpitModel import cockpit_nodes, cockpit_sections
+from Ps2CockpitModel import cockpit_draw_packets, cockpit_nodes, cockpit_sections
 
 
 NO_NODE = 0xffffffff
@@ -93,7 +93,7 @@ class Strips:
         self.strips.append(SimpleNamespace(count=len(points), position=start, uv=uv))
 
 
-def wheel_shape(image, palette, width, height):
+def cabin_swatch(image, palette):
     clut = [palette[i:i + 4] for i in range(0, len(palette), 4)]
     colors = [clut[(i & ~24) | ((i & 8) << 1) | ((i & 16) >> 1)] for i in range(256)]
 
@@ -102,6 +102,10 @@ def wheel_shape(image, palette, width, height):
         index = min(candidates, key=lambda i: sum((c - level)**2 for c in colors[image[i]][:3]))
         return ((index % 128 + .5) / 128, (index // 128 + .5) / 128)
 
+    return swatch
+
+
+def wheel_shape(image, palette, width, height):
     def circle(angle, radius, z=0):
         return math.cos(angle) * radius, math.sin(angle) * radius, z
 
@@ -111,7 +115,7 @@ def wheel_shape(image, palette, width, height):
         xyz = [(x * width, y * height, (z - y * .36) * width) for x, y, z in points]
         result.add(xyz, (uv,) * len(xyz))
 
-    rubber, alloy, hub = (swatch(level) for level in (30, 115, 50))
+    rubber, alloy, hub = map(cabin_swatch(image, palette), (30, 115, 50))
     for i in range(24):
         a, b = (math.tau * k / 24 for k in (i, i + 1))
         add([circle(a, 1), circle(a, .82), circle(b, 1), circle(b, .82)], rubber)
@@ -162,6 +166,49 @@ def rear_mirror(cabin, mesh, strips):
     cabin.replace("int_rear_mirror", glass.mesh, glass.strips)
 
 
+def dashboard(cabin, image, palette):
+    face_tint, chrome, tick = map(cabin_swatch(image, palette), (22, 145, 190))
+    radius, center_y = .063, .81
+
+    def add(strips, points, uv):
+        strips.add(points, (uv,) * len(points))
+
+    for name, center, marker in (("db5_speed", .252, 0x5053), ("db5_revs", .432, 0x5052)):
+        face = Strips()
+
+        def ring(r, angle, z):
+            return center + r * math.cos(angle), center_y + r * math.sin(angle), z
+
+        for i in range(24):
+            a, b = (math.tau * k / 24 for k in (i, i + 1))
+            add(face, [(center, center_y, .164), ring(radius * .93, a, .164), ring(radius * .93, b, .164)],
+                face_tint)
+            add(face, [ring(radius, a, .161), ring(radius * .93, a, .161),
+                       ring(radius, b, .161), ring(radius * .93, b, .161)], chrome)
+        for i in range(17):
+            angle = math.radians(225 - i * 270 / 16)
+            a, b = angle - .014, angle + .014
+            length = radius * (.73 if i % 2 == 0 else .80)
+            add(face, [ring(length, a, .161), ring(length, b, .161),
+                       ring(radius * .89, a, .161), ring(radius * .89, b, .161)], tick)
+        cabin.append(name + "_face", "int_main_body", IDENTITY, face.mesh, face.strips)
+
+        needle = Strips()
+        angle = math.radians(225)
+        x, y = math.cos(angle), math.sin(angle)
+        add(needle, [(center - y * .0022, center_y + x * .0022, .157),
+                     (center + y * .0022, center_y - x * .0022, .157), ring(radius * .80, angle, .157)], tick)
+        cabin.append(name + "_needle", "int_main_body", IDENTITY, needle.mesh, needle.strips)
+        packet = bytearray(cabin.draws[-1])
+        draw = next(cockpit_draw_packets(packet, 40, len(packet)))
+        if packet[60:72] != bytes(12) or draw.vertex.payload - 60 != 220:
+            raise ValueError("Unexpected DB5 gauge needle draw layout")
+        # VIF ignores these NOP arguments; the runtime uses them to find the three needle vertices.
+        struct.pack_into("<3I", packet, 60, 0x4244, 0x3535, marker)
+        packet[draw.color.payload:draw.color.payload + 12] = bytes((128, 40, 30, 128)) * 3
+        cabin.draws[-1] = bytes(packet)
+
+
 def convert_cabin(interior_model, interior_mesh, donor_model, donor_mesh, target, image, palette):
     cabin = Cabin(target)
     parts = db5_draw_parts(interior_model, interior_mesh, {119: 64, 12: 24, 13: 26})
@@ -197,4 +244,5 @@ def convert_cabin(interior_model, interior_mesh, donor_model, donor_mesh, target
     mount = bytearray(matrix)
     struct.pack_into("<f", mount, 56, .10)
     cabin.append("steering_wheel", "int_main_body", mount, wheel.mesh, wheel.strips)
+    dashboard(cabin, image, palette)
     return cabin.encode()

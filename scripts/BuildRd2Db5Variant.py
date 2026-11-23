@@ -201,6 +201,8 @@ def build(rd2, rd3, donor_sound=False, donor_cockpit=False):
     }
     if donor_sound:
         result.update(sound_assets(rd2, rd3))
+    if donor_cockpit:
+        result["db5-dials.ini"] = b"DB5DIALS 1\r\n"
     return result
 
 
