@@ -16,10 +16,52 @@ from BuildTrackGeometryOverlay import FOOTER, RELOCATION, VERTEX as SCENE_VERTEX
 from ModAssets import find_member, replace_member
 from Ps2CarModel import mesh_export, mesh_import, mesh_packets
 from Ps2TrackCollision import CELL, GRID_CELLS, POLYGON, REFERENCE, TRIANGLE, VERTEX, Collision, collision_append
+from Ps2TrackRoute import EVENT, MAGIC, POINT, SECTION, read_route, route_export, route_import
 from Ps2TrackScene import Scene, scene_append
 
 
 class ModAssetTests(unittest.TestCase):
+    def test_route_csv_preserves_lanes_and_verifies_the_auxiliary_span(self):
+        header = MAGIC + SECTION.pack(4, 1, 1) + SECTION.pack(2, 0x21, 0) + SECTION.pack(3, 3, 0)
+        events = b"".join(EVENT.pack(1, -0.0, distance, code, 255, 0, 0) for distance, code in
+                          ((100, 6), (15, 13), (60, 0), (80, 12), (90, 0), (5, 0), (80, 0), (100, 0), (15, 0)))
+        points = b"".join(POINT.pack(-i - 0.125, i + 0.75) for i in range(14))
+        original = header + events + points
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            source, table = work / "source.ail", work / "stations.csv"
+            output = work / "roundtrip.ail"
+            source.write_bytes(original)
+            route_export(SimpleNamespace(input=source, output=table))
+            args = SimpleNamespace(input=source, csv=table, output=output)
+            route_import(args)
+            self.assertEqual(output.read_bytes(), original)
+            with table.open(newline="", encoding="utf-8") as stream:
+                reader = csv.DictReader(stream)
+                fields = reader.fieldnames
+                rows = list(reader)
+            self.assertEqual(rows[0]["x5"], "")
+            self.assertEqual(float(rows[4]["x5"]), -6.125)
+            rows[4]["x5"] = "-5.5"
+            rows[1]["code"], rows[2]["code"] = rows[2]["code"], rows[1]["code"]
+            with table.open("w", newline="", encoding="utf-8") as stream:
+                writer = csv.DictWriter(stream, fields)
+                writer.writeheader()
+                writer.writerows(rows)
+            args.output = work / "edited.ail"
+            with self.assertRaisesRegex(ValueError, "do not span"):
+                route_import(args)
+            self.assertFalse(args.output.exists())
+            rows[1]["code"], rows[2]["code"] = rows[2]["code"], rows[1]["code"]
+            with table.open("w", newline="", encoding="utf-8") as stream:
+                writer = csv.DictWriter(stream, fields)
+                writer.writeheader()
+                writer.writerows(rows)
+            route_import(args)
+            edited = read_route(args.output.read_bytes())
+            self.assertEqual(edited[1].lanes[1][0], (-5.5, 6.75))
+            self.assertEqual(edited[0], read_route(original)[0])
+
     def test_scene_append_links_a_new_root_and_serializes_authored_positions(self):
         base, root, leaf, packet_at = 0x200000, 0x10, 0x30, 0xa0
         packet = struct.pack("<5I", 0x6c018000, 0x100, 3, 0x107, 0)

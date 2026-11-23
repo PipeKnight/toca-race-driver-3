@@ -54,6 +54,27 @@ python scripts/ModAssets.py extract --file "$addon\TRACK.JPK" --inside osc1.big 
 python scripts/ModAssets.py route-obj "$work\roa.ail" "$work\roa-route.obj"
 ```
 
+### Edit route lanes and checkpoints
+
+`route-export` writes one CSV row per station for the main, pit, and auxiliary sections. The `xN` and `zN` columns hold metre coordinates for lane bit `N`. Leave a lane blank when it is absent from that section. The four event bytes are `code`, `tag`, `argument`, and `reserved`. On the verified circuits, main-route code `10` marks a checkpoint and its tag identifies it. To move a checkpoint to a nearby unused station, move all four event bytes together and copy the unused station's event bytes into the vacated row. Keep the order of the checkpoints as encountered by the car.
+
+Main-route codes `12` and `13` delimit the span represented by the auxiliary route. The importer checks the number of stations across that span, including both endpoints and any wrap across the start line. It retains the template's station count, lane mask, and loop flag for every section. Keep the distances and normals consistent with the edited lane positions. Small lateral edits can reuse the template distances. A new route shape needs its own distances, normals, and matching collision.
+
+Set `$addon` to the [expanded add-on](ps2-disc-and-archives.md#add-a1-ring-gp-and-short) with A1-Ring Short in `tqa3`.
+
+```powershell
+$trial = 'D:\Mods\Short Route Test'
+Copy-Item -LiteralPath $addon -Destination $trial -Recurse
+python scripts/ModAssets.py extract --file "$trial\tqa3\TRACK.JPK" --inside osc1.big osc1.ail "$work\short.ail"
+python scripts/ModAssets.py route-export "$work\short.ail" "$work\short.csv"
+# Save the edited table as short-edited.csv without changing station IDs or columns.
+python scripts/ModAssets.py route-import "$work\short.ail" "$work\short-edited.ail" --csv "$work\short-edited.csv"
+python scripts/ModAssets.py replace --file "$trial\tqa3\TRACK.JPK" --inside osc1.big osc1.ail "$work\short-edited.ail" "$work\TRACK.JPK"
+Copy-Item -LiteralPath "$work\TRACK.JPK" -Destination "$trial\tqa3\TRACK.JPK"
+```
+
+Test the edited route in both Time Trial and a race with opponents. [PS2 route format](ps2-disc-and-archives.md#editing-ps2-track-routes)
+
 ### Test a track change on Windows
 
 1. Build the [Road America add-on](ps2-disc-and-archives.md#play-road-america-from-your-own-discs) from your two disc copies. Keep that directory as the control. Put successive experiments in new directories.

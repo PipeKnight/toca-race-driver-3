@@ -6,7 +6,6 @@ from collections import Counter
 from dataclasses import dataclass
 import hashlib
 import json
-import math
 from pathlib import Path
 import struct
 
@@ -20,6 +19,7 @@ from BuildTrackCollisionOverlay import (
 )
 from BuildTrackGeometryOverlay import DMA_BYTES, DMA_SECTOR
 from Ps2TrackCollision import collision_append, collision_export
+from Ps2TrackRoute import route_export, route_import, route_obj
 from Ps2TrackScene import scene_append, scene_info
 
 
@@ -220,37 +220,6 @@ def collision_surface(args):
         stream.write(data)
 
 
-def route_obj(args):
-    data = args.input.read_bytes()
-    if data[:8] != b"AILD\x09\0\0\0":
-        raise ValueError("Expected an AILD version 9 route")
-    groups = tuple(struct.iter_unpack("<HBB", data[8:20]))
-    if len(groups) != 3 or any(not count or not mask or loop not in (0, 1) for count, mask, loop in groups):
-        raise ValueError("Invalid AILD section headers")
-    offset = 20 + 16 * sum(count for count, _, _ in groups)
-    if len(data) != offset + 8 * sum(count * mask.bit_count() for count, mask, _ in groups):
-        raise ValueError("AILD length does not match its route section sizes")
-    obj = ["# Race Driver 3 route. Coordinates are X/Z, with Y set to zero.\n"]
-    first = 1
-    for label, (count, mask, loop) in zip(("main", "pit", "auxiliary"), groups):
-        for lane in range(mask.bit_count()):
-            end = offset + count * 8
-            obj.append(f"g {label}_{lane}\n")
-            for x, z in struct.iter_unpack("<2f", data[offset:end]):
-                if not math.isfinite(x) or not math.isfinite(z):
-                    raise ValueError("AILD contains a non-finite route coordinate")
-                obj.append(f"v {x:.9g} 0 {z:.9g}\n")
-            indices = list(range(first, first + count))
-            if loop:
-                indices.append(first)
-            if len(indices) > 1:
-                obj.append("l " + " ".join(map(str, indices)) + "\n")
-            first += count
-            offset = end
-    with args.output.open("x", encoding="utf-8", newline="\n") as stream:
-        stream.writelines(obj)
-
-
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -287,6 +256,8 @@ def main():
         ("scene-info", "list track scene roots with usable material leaves", scene_info),
         ("scene-append", "add OBJ triangles to a PS2 track scene using a local material", scene_append),
         ("route-obj", "export AILD version 9 routes as flat OBJ polylines", route_obj),
+        ("route-export", "export AILD version 9 stations and markers to CSV", route_export),
+        ("route-import", "rebuild an AILD version 9 route from a station CSV and template", route_import),
     ):
         command = commands.add_parser(name, help=help_text)
         command.add_argument("input", type=Path)
@@ -309,11 +280,13 @@ def main():
                                  help="material leaf offset from scene-info")
             command.add_argument("--rgb", type=int, nargs=3, metavar=("R", "G", "B"), help="override the material's vertex color")
             command.add_argument("--offset-y", type=float, default=0, help="shift authored vertices vertically in metres")
+        if name == "route-import":
+            command.add_argument("--csv", type=Path, required=True, help="station CSV from route-export")
         command.set_defaults(run=handler)
     args = parser.parse_args()
     try:
         args.run(args)
-    except (OSError, ValueError, IndexError, KeyError, TypeError, struct.error) as error:
+    except (OSError, ValueError, OverflowError, IndexError, KeyError, TypeError, struct.error) as error:
         parser.exit(1, f"Asset operation failed: {error}\n")
 
 
