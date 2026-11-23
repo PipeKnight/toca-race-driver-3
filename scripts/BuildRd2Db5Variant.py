@@ -13,14 +13,36 @@ from BuildTrackCollisionOverlay import (
     DONOR_DIRECTORY_HASH, REFERENCE_DIRECTORY_HASH, SECTOR_SIZE, read_exact, verify_directory,
 )
 from ConvertRd2CarModel import convert_model, convert_textures
-from ModAssets import REFERENCE_PACKAGES, find_member, replace_member
+from ModAssets import REFERENCE_PACKAGES, find_member, read_part_map, replace_member
+from Ps2CarModel import model_sections
 
 
 def member(archive, name):
     return find_member(archive, name)[0].read(archive)
 
 
-def driving_csv(donor, target, name):
+def tire_radii(model, part_map):
+    _, base, _, sections = model_sections(model)
+    first = struct.unpack_from("<I", model, sections[0][0] + 0x24)[0] - base
+    high = read_part_map(part_map)[0]
+    radii = []
+    for left, right in ((46, 52), (58, 64)):
+        heights = []
+        for slot in (left, right):
+            if high[slot] == 0xffffffff:
+                raise ValueError(f"Missing DB5 tire in high-detail part slot {slot}")
+            part = first + high[slot] * 0x30
+            minimum = struct.unpack_from("<f", model, part + 0x14)[0]
+            maximum = struct.unpack_from("<f", model, part + 0x24)[0]
+            heights.append(maximum - minimum)
+        radius = sum(heights) / 4
+        if not 0.2 < radius < 0.5:
+            raise ValueError("Invalid DB5 tire radius")
+        radii.append(f"{radius:.6f}")
+    return radii
+
+
+def driving_csv(donor, target, name, radii):
     source_rows = list(csv.reader(member(donor, name).decode("ascii").splitlines()))
     target_rows = list(csv.reader(member(target, name).decode("ascii").splitlines()))
     if (len(source_rows) != 1 or len(target_rows) != 1 or len(source_rows[0]) != 130
@@ -34,6 +56,7 @@ def driving_csv(donor, target, name):
                 row[index] = source[index]
             elif 17 <= index < 49 or 68 <= index < 76:
                 row[index] = "0"
+    row[145:147] = radii
     output = io.StringIO()
     csv.writer(output, lineterminator="\r\n").writerow(row)
     return output.getvalue().encode("ascii")
@@ -56,9 +79,10 @@ def build(rd2, rd3):
         member(donor_models, "vc_2_hi.tex"), read_disc_range(rd3, 2, 185648, 381204))
     archive = append_variant(target, low)
     variant = member(archive, "dtmx_20.big")
+    radii = tire_radii(model, part_map)
     changes = {"part.map": part_map, "dmg.ini": member(donor_mechanics, "dmg.ini")}
     for name in ("Mech.csv", "SimMech.csv"):
-        changes[name] = driving_csv(donor_mechanics, variant, name)
+        changes[name] = driving_csv(donor_mechanics, variant, name, radii)
     for name, data in changes.items():
         variant = replace_member(variant, [name], data)
     archive = repack_jpak(archive, 61, {

@@ -14,6 +14,7 @@ from BuildRoadAmericaMod import (
 )
 from BuildTrackCollisionOverlay import encode_lzss, encode_lzss_compact
 from BuildTrackGeometryOverlay import FOOTER, RELOCATION, VERTEX as SCENE_VERTEX, vif_commands
+from ConvertRd2CarModel import convert_draw_transforms, convert_textures, serialize_relocations
 from ModAssets import find_member, replace_member
 from Ps2CarModel import (
     MeshPacket, UV, lod_packet_ranges, mesh_export, mesh_import, mesh_packets, mesh_replace, part_map_coverage,
@@ -24,6 +25,58 @@ from Ps2TrackScene import Scene, scene_append
 
 
 class ModAssetTests(unittest.TestCase):
+    def test_rd2_class_texture_normalizes_the_embedded_far_texture(self):
+        base, target = 0x2e80b80, 0x4bd0b80
+        data = bytearray(0x600)
+        far_header = 0x300
+        struct.pack_into("<I", data, 8, base + far_header)
+        relocations = {8: 0, 0x10: 3, far_header: 3}
+        for header in (0x20, far_header + 0x10):
+            row = header + 0x10
+            struct.pack_into("<2I", data, header, 1, base + row)
+            struct.pack_into("<I", data, header - 12, base + 0x500)
+            struct.pack_into("<I", data, row + 0x38, 8192)
+            struct.pack_into("<I", data, row + 0xcc, base + 0x500)
+            struct.pack_into("<I", data, row + 0xe8, base + 0x580)
+            relocations.update({header + 4: 0, row + 0xcc: 0, row + 0xe8: 0})
+
+        source = serialize_relocations(data, relocations, base)
+        result = convert_textures(source, serialize_relocations(data, relocations, target))
+
+        self.assertEqual(struct.unpack_from("<I", result, 8)[0], target + far_header)
+        for row in (0x30, far_header + 0x20):
+            self.assertEqual(struct.unpack_from("<I", result, row + 0x38)[0], 1)
+            self.assertEqual(struct.unpack_from("<I", result, row + 0xe8)[0], target + 0x580)
+
+    def test_rd2_draw_transforms_use_inline_rd3_matrix_slots(self):
+        base = 0x123400
+        model = bytearray(0x320)
+        sections = [(0x38, 0x1a0), (0x1a0, 0x320)]
+        high, lower = 0x100, 0x210
+        for (start, _), draw in zip(sections, (high, lower)):
+            part = start + 0x30
+            struct.pack_into("<2I", model, start + 0x24, base + part, base + part + 0x30)
+            struct.pack_into("<I", model, part + 8, base + draw)
+            struct.pack_into("<2I", model, draw + 0x5c, 1, 0x112e2e2e)
+            struct.pack_into("<I", model, draw + 0x94, base + draw + 0x9c)
+        struct.pack_into("<I", model, high, 0x10000000)
+        struct.pack_into("<I", model, high + 0x10, 0x10000005)
+        struct.pack_into("<2I", model, lower, 0x30000005, base + high + 0x20)
+        struct.pack_into("<2I", model, lower + 0x10, 0x20000000, base + lower + 0x70)
+        composite = 0x2d0
+        struct.pack_into("<4I", model, composite, 0x30000005, base + high + 0x20, 0, 0x6c048000)
+        entries = {lower: 3, lower + 0x10: 3, lower + 0x90: 3, composite: 3}
+
+        converted, relocations = convert_draw_transforms(model, base, entries, sections)
+
+        for draw in (high, lower):
+            self.assertEqual(struct.unpack_from("<8I", converted, draw),
+                             (0x10000000, 0, 0, 0, 0x10000005, 0, 0, 0x6c048000))
+            self.assertEqual(struct.unpack_from("<I", converted, draw + 0x5c)[0], 2)
+        self.assertEqual(relocations, {lower + 0x90: 3, composite: 3})
+        self.assertEqual(struct.unpack_from("<I", converted, lower + 0x94)[0], base + lower + 0x9c)
+        self.assertEqual(struct.unpack_from("<I", converted, composite + 4)[0], base + lower + 0x20)
+
     def test_foundry_route_has_ordered_sector_splits_for_ghost_recording(self):
         main, _, _ = read_route(build_route())
         self.assertEqual(main.events[0][3], 6)

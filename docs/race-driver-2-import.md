@@ -92,7 +92,7 @@ python scripts/Ps2CarModel.py model-info "$converted\car.mdl" "$converted\car.ms
     --part-map "$converted\part.map"
 ```
 
-The conversion splits the RD2 mesh into LOD 0 and LODs 1–4, recalculates the DMA lengths and relocation offsets, and removes the separate RD2 color uploads where RD3's mesh walker expects positions. It compacts both the part and binding tables. The part map preserves the logical slot numbers and points each active slot to its new compact index. RD3 uses a different starting index for the draw matrices and emits a local matrix in each LOD. The converter shifts the matrix index and replaces the older shared DMA references with RD3 inline chains. RD2 texture descriptors store an image byte count in the field RD3 uses for the mip upload count. The converter emits one upload per descriptor for the DB5 containers.
+The conversion splits the RD2 mesh into LOD 0 and LODs 1–4, recalculates the DMA lengths and relocation offsets, and removes the separate RD2 color uploads where RD3's mesh walker expects positions. It compacts both the part and binding tables. The part map preserves the logical slot numbers and points each active slot to its new compact index. RD3 uses a different starting index for the draw matrices and emits a local matrix in each LOD. The converter shifts the matrix index, writes inline chains, and points composite parts at matrices in their own LOD. RD2 texture descriptors store an image byte count in the field RD3 uses for the mip upload count. The converter emits one upload per descriptor, including the embedded far-detail texture for LOD 4.
 
 | LOD | Drawable parts | Mesh packets |
 | --- | ---: | ---: |
@@ -106,7 +106,9 @@ The converter also rebuilt all five LODs of the RD2 Ford Falcon against the RD3 
 
 ### In-game status
 
-These outputs are development inputs. A Windows Direct3D 12 diagnostic runner displayed the converted exterior and donor livery in the selector and in the introductory Oschersleben race. Correcting the draw matrix index restored the exterior on track. The DB5 with the converted driving data completed the final lap in 20th place and advanced to the next cutscene. A separate Free Race fixture stalled at the loading screen and logged an invalid VIF stream. The selector, the introductory race, and this Free Race fixture use the existing QA Touring registration.
+These outputs are development inputs. A Windows Direct3D 12 diagnostic runner displayed the converted exterior and donor livery in the selector and in the introductory Oschersleben race. Correcting the draw matrix index restored the exterior on track. The DB5 with the converted driving data finished the introductory race in 20th place and advanced to the next cutscene. It completed a separate one-lap Oschersleben Free Race in 3:08.12 in 21st place using scripted controller input. Replaying that race with the patched Windows runner matched all 779 recorded checkpoints and reached Race Results. A barrier impact in the introductory race deformed the bonnet. These fixtures use the existing QA Touring registration.
+
+An Oschersleben traffic check with the player in a stock Vectra showed the AI driving the DB5. DMA captures identified the converted LOD 1–4 meshes as it pulled away. Converting the embedded texture fixed the out-of-range reads at the transition to LOD 4.
 
 ### Find the donor mechanics
 
@@ -120,7 +122,7 @@ foreach ($member in 'Mech.csv', 'SimMech.csv', 'dmg.ini', 'int.ini', 'num.ini') 
 }
 ```
 
-Each RD2 mechanics row has 130 columns. The RD3 QA Touring rows each have 200 columns. Copying the overlapping driving fields into the RD3 rows changed the car's speed at the same frame of a scripted Oschersleben run. The remaining RD3 fields, sound, cockpit, wheel motion, suspension, and damage behaviour still need their own checks. Acceptance requires a visible car in Free Race, functioning attachments through LOD transitions, and a classified finish.
+Each RD2 mechanics row has 130 columns. The RD3 QA Touring rows each have 200 columns. Copying the overlapping driving fields into the RD3 rows changed the car's speed at the same frame of a scripted Oschersleben run. The two RD3 tire radius fields use the mean of the corresponding donor tire model heights divided by two. For the DB5 this gives 0.322218 metres on both axles. The full exterior still needs verification when the AI drives the DB5, including the door materials, wheel motion, and suspension through LOD transitions. The remaining RD3 driving fields, sound, and cockpit also need conversion or validation.
 
 ### Build the experimental pack from both discs
 
@@ -133,3 +135,5 @@ python scripts/BuildRd2Db5Variant.py --rd2-disc $rd2 --disc $rd3 --output $pack
 ```
 
 Start the introductory race from a fresh data directory. The builder installs the exterior, both texture sets, the part map, the overlapping driving fields, and the RD2 damage configuration in the QA Touring test entry. The test entry retains the Mercedes type name, sound bank, and cockpit. The intro finishes with the original scripted cutscene.
+
+The donor cockpit is in the RD2 interior archive at `RD2_1.HUG` sector 797863 under the `int_db5` basename. It has its own model pair and textures. The RD3 DTM cockpit uses `int_dtm.px`, a version 3 `PS2M` container, and TIM2 textures from `int_dtm.big`. Cockpit conversion requires support for those formats.

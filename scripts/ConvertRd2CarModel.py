@@ -98,6 +98,7 @@ def convert_draw_transforms(model, base, relocations, sections):
     entries = dict(relocations)
     converted = set()
     for start, end in sections:
+        local_matrices = {}
         first, last = (p - base for p in struct.unpack_from("<2I", model, start + 0x24))
         if first != start + 0x30 or not first < last <= end or (last - first) % PART_BYTES:
             raise ValueError("Invalid RD2 part table")
@@ -117,6 +118,8 @@ def convert_draw_transforms(model, base, relocations, sections):
                         or read_word(model, draw + 0x10) != 0x20000000
                         or read_word(model, draw + 0x14) != base + draw + 0x70):
                     raise ValueError("Unexpected RD2 shared matrix chain")
+                shared = read_word(model, draw + 4)
+                local_matrices.setdefault(shared, base + draw + 0x20)
                 del entries[draw]
                 del entries[draw + 0x10]
             elif marker != 0x10000000 or read_word(model, draw + 0x10) != 0x10000005:
@@ -129,6 +132,16 @@ def convert_draw_transforms(model, base, relocations, sections):
             # RD3 has an additional draw matrix slot before the five RD2 slots.
             struct.pack_into("<8I", output, draw, 0x10000000, 0, 0, 0, 0x10000005, 0, 0, 0x6c048000)
             struct.pack_into("<I", output, draw + 0x5c, index + 1)
+        for offset, kind in entries.items():
+            if kind != 3 or not start <= offset <= end - 16:
+                continue
+            tag, pointer, _, unpack = struct.unpack_from("<4I", model, offset)
+            if tag != 0x30000005 or unpack != 0x6c048000 or not base <= pointer < base + start:
+                continue
+            # Composite parts also borrow matrices. Bind them to the same LOD as their geometry.
+            if pointer not in local_matrices:
+                raise ValueError(f"Missing local RD3 draw matrix for RD2 pointer {pointer:#x}")
+            struct.pack_into("<I", output, offset + 4, local_matrices[pointer])
     return output, entries
 
 
@@ -233,18 +246,28 @@ def convert_textures(source, template):
         if not base <= pointer < base + size:
             raise ValueError("Unsupported RD2 texture relocation")
         struct.pack_into("<I", output, field, pointer - base + target_base)
-    header = 0x10 if entries.get(0) == 3 else 0x20
-    count, start = struct.unpack_from("<2I", source, header)
-    start -= base
-    if not 0 <= start < size or not 0 < count <= (size - start) // 0x170:
-        raise ValueError("Invalid RD2 texture descriptors")
-    for index in range(count):
-        row = start + index * 0x170
-        if entries.get(row + 0xcc) != 0 or entries.get(row + 0xe8) != 0:
-            raise ValueError(f"Unknown RD2 texture format at descriptor {index}")
-        # RD2 stores the image size here. RD3 reads the number of mip uploads.
-        struct.pack_into("<I", output, row + 0x38, 1)
-        output[row + 0xd0:row + 0xe8] = bytes(0x18)
+    if entries.get(0) == 3:
+        headers = (0x10,)
+    elif entries.get(0x10) == 3 and entries.get(8) == 0:
+        # The class texture embeds a separate one-image container for LOD 4.
+        far_texture = read_word(source, 8) - base
+        if entries.get(far_texture) != 3:
+            raise ValueError("Missing RD2 far-detail texture container")
+        headers = (0x20, far_texture + 0x10)
+    else:
+        raise ValueError("Unsupported RD2 texture header")
+    for header in headers:
+        count, start = struct.unpack_from("<2I", source, header)
+        start -= base
+        if not header + 16 <= start < size or not 0 < count <= (size - start) // 0x170:
+            raise ValueError("Invalid RD2 texture descriptors")
+        for index in range(count):
+            row = start + index * 0x170
+            if entries.get(row + 0xcc) != 0 or entries.get(row + 0xe8) != 0:
+                raise ValueError(f"Unknown RD2 texture format at descriptor {index}")
+            # RD2 stores the image size here. RD3 reads the number of mip uploads.
+            struct.pack_into("<I", output, row + 0x38, 1)
+            output[row + 0xd0:row + 0xe8] = bytes(0x18)
     return serialize_relocations(output, entries, target_base)
 
 
