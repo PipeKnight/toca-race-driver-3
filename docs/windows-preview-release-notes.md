@@ -1,13 +1,14 @@
 # TOCA Race Driver 3 Recompilation for Windows 11 x64
 
-Version `0.1.0-preview.6` is a development preview for the North American PS2 disc `SLUS-21182` v1.02. Use a disc image from your own copy. The launcher compiles the original executable locally and reads the original disc at runtime. A PS2 BIOS and PCSX2 are unnecessary.
+Version `0.1.0-preview.7` is a development preview for the North American PS2 disc `SLUS-21182` v1.02. Use a disc image from your own copy. The launcher compiles the original executable locally and reads the original disc at runtime. A PS2 BIOS and PCSX2 are unnecessary.
 
 ## Changes in this preview
 
-- The optional circuit pack can include Foundry Oval in a fourth slot alongside Road America and the two A1-Ring layouts. Foundry Oval is a simple original circuit for testing authored PS2 track geometry, collision, routes, and saves.
-- The existing `--road-america PATH` option opens earlier packs or the new four-course pack. Road America retains its dedicated Rain scene when the pack includes the Rain resources.
+- The DTM add-on can load an additional Mercedes variant with edited model meshes and the original Mercedes mechanics. Its default driver is QA Touring. The introductory race assigns it to the player, and it becomes selectable in DTM Free Race after the usual unlock.
+- Build a new add-on directory with the updated `BuildDtmVariant.py` to see QA Touring in the selector. The `--dtm-mod PATH` option still supports the earlier introductory-only add-on and the stock mesh overlays.
+- The optional circuit pack still supports Foundry Oval, Road America, and both A1-Ring layouts. It can be enabled at the same time as the DTM add-on.
 
-Build the add-ons from your own files. [Foundry Oval instructions](https://github.com/PipeKnight/toca-race-driver-3/blob/main/docs/modding.md#build-and-play-foundry-oval) · [DTM model guide](https://github.com/PipeKnight/toca-race-driver-3/blob/main/docs/ps2-dtm-models.md)
+Build the add-ons from your own files. [Additional DTM variant](https://github.com/PipeKnight/toca-race-driver-3/blob/main/docs/modding.md#test-an-additional-dtm-variant) · [Foundry Oval instructions](https://github.com/PipeKnight/toca-race-driver-3/blob/main/docs/modding.md#build-and-play-foundry-oval)
 
 ## First launch
 
@@ -27,4 +28,4 @@ The launcher folder holds the memory card `toca-slus-21182.ps2` and game setting
 
 ## Verification scope
 
-The Windows Sandbox setup checks use software graphics. The Direct3D 12 race checks use an existing Windows 11 installation. Road America finished a Free Race in 3:06.68 and restored a 2:47.56 Time Trial ghost after a restart. The DTM tests loaded edited stock meshes. General-purpose car import, extra Road America weather, and full-game desktop acceptance remain open. Stream-buffer warnings can still occur on Silverstone and UK Rally 3, and software graphics can cause audio underruns. [Windows verification and open acceptance items](https://github.com/PipeKnight/toca-race-driver-3/blob/main/docs/acceptance-checklist.md)
+The clean setup checks use Windows Sandbox with software graphics. The DTM race checks use Direct3D 12 on an existing Windows 11 installation. The Free Race test used an isolated profile with the DTM event data assigned to an unlocked event. It selected QA Touring and started a 21-car field on Hockenheim GP and Oschersleben. General-purpose car import, extra Road America weather, and full-game desktop acceptance remain open. Stream-buffer warnings can still occur on Silverstone and UK Rally 3, and software graphics can cause audio underruns. [Windows verification and open acceptance items](https://github.com/PipeKnight/toca-race-driver-3/blob/main/docs/acceptance-checklist.md)
