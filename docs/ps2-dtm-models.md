@@ -124,6 +124,26 @@ The standard Windows runner replayed the final lap at Oschersleben from frame 32
 
 The class-package edit adjusted the roof in LODs 1–4. It raised centreline vertices in LODs 1 and 2. The two coarsest levels used a raised roof silhouette with the adjacent shared vertices moved by the same amount. The edits fit the original streams and the rebuilt package retained its disc extent.
 
-Paired Direct3D 12 runs at Oschersleben cycled through the cockpit, bonnet, bumper, and chase cameras. The modified LOD 0 roof remained visible on returning to chase view. The captures also showed pixel changes on distant opponents after editing the far roof. A local VIF1 DMA probe matched the edited LOD 4 roof stream on 347 frames, from frame 3105 to 3451. The ordinary runner and the probe produced eight byte-identical images with the same overlay. The modified LOD 1–3 streams matched guest RAM. Their use in a rendered frame still needs verification. Local evidence is under `local/dtm-authored/lod-test/` and `local/dtm-modding/lod-far-ordinary/`.
+Paired Direct3D 12 runs at Oschersleben cycled through the cockpit, bonnet, bumper, and chase cameras. The modified LOD 0 roof remained visible on returning to chase view. The captures also showed pixel changes on distant opponents after editing the far roof. A local VIF1 DMA probe matched the edited LOD 4 roof stream on 347 frames, from frame 3105 to 3451. The ordinary runner and the probe produced eight byte-identical images with the same overlay. Local evidence is under `local/dtm-authored/lod-test/` and `local/dtm-modding/lod-far-ordinary/`. [Intermediate-level verification](#observe-detail-levels-when-cars-pass)
 
 Three diagnostic overlays changed the four floats at `.mdl` offset `0x18`. The recorded roof transfers still used LODs 0 and 4 at the same frames. The probe traces from those experiments are under `local/dtm-modding/lod-force-1/` through `lod-force-3/`.
+
+### Observe detail levels when cars pass
+
+The reference game loads `LOD.ini` from the shared package at `RDH_1.HUG` sector 67712. Function `0x001d07a8` reads separate tables for the number of cars at each level and the distances. The stock single-player table has limits of 1, 3, 5, and 7 for LODs 0–3 and distances of 15, 30, 60, and 80 for LODs 1–4. The game stores the squared distances in EE RAM at `0x00577b84`. A local read overlay changed the distance table to 1, 40, 110, and 150 while retaining the stock car limits. The resulting race loaded and the EE table contained those values squared. A separate test that raised the three intermediate car limits to 20 remained at the loading screen through the observation window.
+
+```powershell
+python scripts/ModAssets.py extract --disc $disc --range 1 67712 43008 LOD.ini "$work\LOD.ini"
+```
+
+With the stock configuration, braking on the rolling start at Oschersleben let several opponents pass the player. A local DMA probe classified transfers against the `.mdl` mesh ranges over frames 3050–3999. Each of the three DTM models submitted all four class-package detail levels in that interval.
+
+| Model | Frames with LOD 1 transfers | LOD 2 | LOD 3 | LOD 4 |
+| --- | ---: | ---: | ---: | ---: |
+| Mercedes C-Class | 297 | 192 | 77 | 865 |
+| Audi A4 | 591 | 285 | 161 | 876 |
+| Vectra | 160 | 127 | 69 | 870 |
+
+These counts measure frames with at least one transfer from the corresponding section. The class submission trace is under `local/dtm-modding/lod-family-traffic/`. The local configuration edits and the original read trace are under `local/dtm-authored/lod-traffic/`.
+
+The ordinary Direct3D 12 runner repeated the same inputs with the stock configuration and captured 34 matched frames per run. In each comparison only the selected Mercedes class-mesh level changed. The player used the same high-detail roof in every run. Twenty-two LOD 1 captures, twelve LOD 2 captures, and five LOD 3 captures differed from the control. The changes were on the roofs of passing or distant cars. The independent DMA trace reported the corresponding Mercedes level on all 22 LOD 1 frames, all 12 LOD 2 frames, and four of the five LOD 3 frames. Example pairs are frame 3460 for LOD 1, frame 3380 for LOD 2, and frame 3730 for LOD 3. The paired captures are under `local/dtm-modding/lod-isolated-0/` through `lod-isolated-3/`.
