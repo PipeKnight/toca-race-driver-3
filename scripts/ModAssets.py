@@ -30,6 +30,7 @@ REFERENCE_PACKAGES = {
     "oschersleben-scene": (1, DMA_SECTOR, DMA_BYTES),
     "oschersleben-metadata": (1, 522960, 328064),
     "car-types": (1, 66833, 17152),
+    "cockpits": (1, 745296, 2529280),
     "dtm-cars": (2, 187552, 5145344),
     "dtm-mercedes-hi": (2, 190800, 369788),
 }

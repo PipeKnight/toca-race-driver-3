@@ -5,6 +5,7 @@ import argparse
 import csv
 import io
 from pathlib import Path
+import re
 import struct
 
 from BuildDtmVariant import append_variant, read_disc_range
@@ -88,6 +89,27 @@ def sound_assets(rd2, rd3):
     return {"cars.big": cars, "system.icz": system + b"DB5=37\r\n"}
 
 
+def car_type_catalog(disc, mechanics):
+    original = read_disc_range(disc, 1, 66833, 17152)
+    car_types, base = read_bigf(original, 82)
+    record = 110
+    record_pattern = re.compile(rb"(?mi)^HOFIndex[ \t]*=[ \t]*(\d+)")
+    used_records = {
+        int(match[1]) for data in car_types.values() if (match := record_pattern.search(data))
+    }
+    if record in used_records or any(b"StringID=DB5" in data for data in car_types.values()):
+        raise ValueError("The DB5 vehicle type or record index is already in use")
+    row = next(csv.reader(member(mechanics, "Mech.csv").decode("ascii").splitlines()))
+    if len(row) != 130 or row[1] != "Aston Martin DB5" or not row[3].isdigit():
+        raise ValueError("Expected a DB5 mechanics row with a vehicle weight")
+    car_types[b"ASTDB5.ini"] = (
+        "[info]\r\nStringID=DB5\r\nFullName=Aston Martin DB5\r\nShortName=Aston Martin DB5\r\n"
+        f"Manufacturer=AST\r\nWeight={row[3]}\r\nBHP=0\r\n0To60=0\r\nHOFIndex = {record}\r\n"
+    ).encode("ascii")
+    base = max(base, (0x24 + BIGF_ENTRY.size * len(car_types) + 31) & ~31)
+    return repack_bigf(original, car_types, base, base, len(original))
+
+
 def build(rd2, rd3, donor_sound=False):
     verify_directory(rd2 / "RD2.DIR", DONOR_DIRECTORY_HASH)
     verify_directory(rd3 / "RDH.DIR", REFERENCE_DIRECTORY_HASH)
@@ -106,7 +128,13 @@ def build(rd2, rd3, donor_sound=False):
     archive = append_variant(target, low)
     variant = member(archive, "dtmx_20.big")
     radii = tire_radii(model, part_map)
-    changes = {"part.map": part_map, "dmg.ini": member(donor_mechanics, "dmg.ini")}
+    variant_type = member(variant, "type.ini")
+    if b"type=CKL" not in variant_type:
+        raise ValueError("Expected the RD3 Mercedes template type")
+    changes = {
+        "part.map": part_map, "dmg.ini": member(donor_mechanics, "dmg.ini"),
+        "type.ini": variant_type.replace(b"type=CKL", b"type=DB5"),
+    }
     for name in ("Mech.csv", "SimMech.csv"):
         changes[name] = driving_csv(donor_mechanics, variant, name, radii, donor_sound)
     for name, data in changes.items():
@@ -120,12 +148,13 @@ def build(rd2, rd3, donor_sound=False):
     car = b"CareerOfferCarID = dtmx_13/CKL"
     if intro.count(car) != 1:
         raise ValueError("The reference introductory race's DTM car assignment was not found")
-    events = replace_member(events, ["1st__.ini"], intro.replace(car, b"CareerOfferCarID = dtmx_20/CKL"))
+    events = replace_member(events, ["1st__.ini"], intro.replace(car, b"CareerOfferCarID = dtmx_20/DB5"))
     result = {
         "DTMX_EXT.JPK": archive,
         "DTMX_20_HI.TEX": high_texture,
         "QA_TOURING_HI.MSH": high,
         "events.big": events,
+        "cartype.big": car_type_catalog(rd3, donor_mechanics),
     }
     if donor_sound:
         result.update(sound_assets(rd2, rd3))

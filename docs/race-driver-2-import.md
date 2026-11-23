@@ -106,7 +106,7 @@ The converter also rebuilt all five LODs of the RD2 Ford Falcon against the RD3 
 
 ### In-game status
 
-These outputs are development inputs. A Windows Direct3D 12 diagnostic runner displayed the converted exterior and donor livery in the selector and in the introductory Oschersleben race. Correcting the draw matrix index restored the exterior on track. The DB5 with the converted driving data finished the introductory race in 20th place and advanced to the next cutscene. It completed a separate one-lap Oschersleben Free Race in 3:08.12 in 21st place using scripted controller input. Replaying that race with the patched Windows runner matched all 779 recorded checkpoints and reached Race Results. A barrier impact in the introductory race deformed the bonnet. These fixtures use the existing QA Touring registration.
+These outputs are development inputs. A Windows Direct3D 12 diagnostic runner displayed the converted exterior and donor livery in the selector and in the introductory Oschersleben race. Correcting the draw matrix index restored the exterior on track. The DB5 with the converted driving data finished the introductory race in 20th place and advanced to the next cutscene. It completed a separate one-lap Oschersleben Free Race in 3:08.12 in 21st place using scripted controller input. Replaying that race with the patched Windows runner matched all 779 recorded checkpoints and reached Race Results. A barrier impact in the introductory race deformed the bonnet. The one-lap completion fixture used the earlier QA Touring registration.
 
 An Oschersleben traffic check with the player in a stock Vectra showed the AI driving the DB5. DMA captures identified the converted LOD 1–4 meshes as it pulled away. Converting the embedded texture fixed the out-of-range reads at the transition to LOD 4.
 
@@ -126,7 +126,7 @@ Each RD2 mechanics row has 130 columns. The RD3 QA Touring rows each have 200 co
 
 ### Build the experimental pack from both discs
 
-Use a local Windows launcher built with `ps2-native-recomp-v0.0.5-dtm-converted-model.patch` from the source manifest. The released Windows preview 7 expects the older fixed-size variant files.
+Use a local Windows launcher built with the converted model and variant type patches from the source manifest. The released Windows preview 7 expects the older fixed-size variant files.
 
 ```powershell
 $pack = Join-Path $work 'DB5 drive test'
@@ -134,9 +134,31 @@ python scripts/BuildRd2Db5Variant.py --rd2-disc $rd2 --disc $rd3 --output $pack
 & $launcher --disc $rd3Iso --dtm-mod $pack --data-dir "$work\db5-drive-test-player"
 ```
 
-Start the introductory race from a fresh data directory. The builder installs the exterior, both texture sets, the part map, the overlapping driving fields, and the RD2 damage configuration in the QA Touring test entry. The test entry retains the Mercedes type name, sound bank, and cockpit. The intro finishes with the original scripted cutscene.
+Start the introductory race from a fresh data directory. The builder installs the exterior, both texture sets, the part map, the overlapping driving fields, and the RD2 damage configuration in the additional DTM entry. The default build uses the Mercedes cockpit and sound. The sound option below enables the donor audio.
 
-The donor cockpit is in the RD2 interior archive at `RD2_1.HUG` sector 797863 under the `int_db5` basename. It has its own model pair and textures. The RD3 DTM cockpit uses `int_dtm.px`, a version 3 `PS2M` container, and TIM2 textures from `int_dtm.big`. Cockpit conversion requires support for those formats.
+The builder adds `DB5` to the 82-entry `Cartype.big` from `RDH_1.HUG` sector 66833. The new record uses the game's existing Aston Martin manufacturer ID `AST` and a separate car record index, 110. It copies the 1450 kg weight from the DB5 mechanics row. The power and acceleration figures still need source data. The car type file, the introductory car offer, and the added DTM roster entry all use `DB5` as the type. The original Mercedes keeps `CKL`. The Free Race variant still requires the DTM event to be unlocked.
+
+The selector requests a separate shadow file using the type ID. The runner redirects `Cars\Shadows\DB5.shd` to the Mercedes template's shadow until the port has a DB5 shadow mesh. A Windows 11 Direct3D 12 selector test showed the DB5 model, its name and 1450 kg in an isolated event fixture. The Mercedes team label remains visible because the added driver shares the original event's team registration.
+
+### Extract the cockpit inputs
+
+The RD2 interior archive has 128 entries. Extract the DB5 mesh pair and both texture containers from that archive. The RD3 interior archive has 24 entries. Its DTM cockpit contains a version 3 `PS2M` model and four TIM2 textures. The DTM class package carries the same cockpit files alongside the exterior models.
+
+```powershell
+$cockpit = Join-Path $work 'DB5 cockpit'
+New-Item -ItemType Directory -Path $cockpit | Out-Null
+foreach ($member in 'int_db5.mdl', 'int_db5.msh', 'int_db5.tex', 'int_db5_hi.tex') {
+    python scripts/ModAssets.py extract --rd2-disc $rd2 --range 1 797863 10001732 $member "$cockpit\$member"
+}
+foreach ($member in 'int_dtm.px', 'int_dtm.big') {
+    python scripts/ModAssets.py extract --disc $rd3 --package cockpits $member "$cockpit\$member"
+}
+python scripts/ModAssets.py list --file "$cockpit\int_dtm.big"
+```
+
+The donor `int.ini` identifies exterior part 2 for the cockpit view and provides the camera, steering, and driver coordinates. Importing the cockpit still requires converting the RD2 mesh pair and texture container, then verifying the part binding on the added variant.
+
+The 12 stock RD3 `.px` cockpit models tested share a little-endian offset at file position `0x20` to a block containing the scene names. At offset `0x24` within that block is the byte length of the null-separated name table, which starts at `0x28`. For `int_dtm.px`, the block starts at `0xf3a0` and the table has 388 bytes. Its names include `int_main_body` and `r_door`. The table also names lights and targets. Match materials and drawable objects separately when mapping the donor cockpit.
 
 ### Test the legacy DB5 sound banks
 

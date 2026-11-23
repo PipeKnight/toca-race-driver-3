@@ -1,0 +1,110 @@
+diff --git a/runtime/src/disc.cpp b/runtime/src/disc.cpp
+--- a/runtime/src/disc.cpp
++++ b/runtime/src/disc.cpp
+@@ -201,6 +201,7 @@
+     std::size_t limit;
+     std::size_t exact;
+ };
++constexpr DtmVariantFile db5_type_catalog{"CARTYPE.BIG", "cartype.big", 17152, 17152};
+ constexpr std::array dtm_variant_files{
+     DtmVariantFile{"CARDATA\\DTMX\\DTMX.JPK", "DTMX_EXT.JPK", 8 * 1024 * 1024, 0},
+     DtmVariantFile{"CARDATA\\DTMX\\QA_TOURING_HI.MSH", "QA_TOURING_HI.MSH", 369788, 0},
+@@ -211,9 +212,11 @@
+     DtmVariantFile{"CARDATA\\DTMX\\QA_TOURING.MSH", "QA_Touring.msh", 376572, 0},
+     DtmVariantFile{"SOUND\\CARS.BIG", "cars.big", 2 * 1024 * 1024, 0},
+     DtmVariantFile{"SOUND\\SYSTEM.ICZ", "system.icz", 2048, 0},
++    db5_type_catalog,
+ };
+ constexpr std::size_t dtm_variant_menu_start = 3;
+ constexpr std::size_t dtm_variant_sound_start = 7;
++constexpr std::size_t dtm_variant_type_index = 9;
+ constexpr std::uint32_t dtm_variant_first_sector = 742000;
+ constexpr std::uint32_t dtm_variant_event_sector = 81008;
+ constexpr std::size_t dtm_variant_event_size = 0x1fe800;
+@@ -275,7 +278,7 @@
+     return true;
+ }
+ 
+-bool append_free_race_driver(std::vector<std::uint8_t> &events) {
++bool append_free_race_driver(std::vector<std::uint8_t> &events, bool db5) {
+     constexpr std::size_t directory_start = 0x24, row_size = 24;
+     if (events.size() < directory_start || std::memcmp(events.data(), "BIGF", 4)) return false;
+     const auto count = u32(events.data() + 4);
+@@ -302,9 +305,11 @@
+             const auto last = modified.find("[Driver 14]\r\n");
+             if (first == std::string::npos || last == std::string::npos || last <= first) return false;
+             auto driver = modified.substr(first, last - first);
++            const auto name = db5 ? "Name = Aston Martin DB5" : "Name = QA Touring";
++            const auto car_uid = db5 ? "CarUID = dtmx_20/DB5" : "CarUID = dtmx_20/CKL";
+             if (!replace_event_text(driver, "[Driver 13]", "[Driver 21]") ||
+-                !replace_event_text(driver, "Name = Alexandros Margaritis", "Name = QA Touring") ||
+-                !replace_event_text(driver, "CarUID = dtmx_13/CKL", "CarUID = dtmx_20/CKL") ||
++                !replace_event_text(driver, "Name = Alexandros Margaritis", name) ||
++                !replace_event_text(driver, "CarUID = dtmx_13/CKL", car_uid) ||
+                 !replace_event_text(driver, "DriverNumber = 17", "DriverNumber = 99") ||
+                 !replace_event_text(modified, "DriversNum = 20\r\n", "DriversNum = 21\r\n") ||
+                 !replace_event_text(modified, "[CarPartUpgrades]", driver + "[CarPartUpgrades]"))
+@@ -359,20 +364,28 @@
+             return false;
+         }
+     }
+-    std::error_code sound_error;
++    std::error_code file_error;
+     std::size_t sound_count = 0;
+-    for (std::size_t i = dtm_variant_sound_start; i < dtm_variant_files.size(); ++i) {
++    for (std::size_t i = dtm_variant_sound_start; i < dtm_variant_type_index; ++i) {
+         const auto &descriptor = dtm_variant_files[i];
+         const auto path = root / descriptor.name;
+-        const bool exists = std::filesystem::exists(path, sound_error);
+-        if (sound_error || (exists && !load_dtm_variant_file(path, mod->files[i], descriptor.limit, 0))) {
++        const bool exists = std::filesystem::exists(path, file_error);
++        if (file_error || (exists && !load_dtm_variant_file(path, mod->files[i], descriptor.limit, 0))) {
+             std::fprintf(stderr, "[dtm-mod] invalid sound asset %s\n", descriptor.name);
+             return false;
+         }
+         sound_count += exists;
+     }
+-    if (sound_count && sound_count != dtm_variant_files.size() - dtm_variant_sound_start) {
++    if (sound_count && sound_count != dtm_variant_type_index - dtm_variant_sound_start) {
+         std::fprintf(stderr, "[dtm-mod] variant sound requires both cars.big and system.icz\n");
++        return false;
++    }
++    const auto type_path = root / db5_type_catalog.name;
++    const bool has_type = std::filesystem::exists(type_path, file_error);
++    auto &types = mod->files[dtm_variant_type_index];
++    if (file_error || (has_type && (!load_dtm_variant_file(type_path, types, db5_type_catalog.limit, db5_type_catalog.exact) ||
++        std::memcmp(types.data(), "BIGF", 4) || u32(types.data() + 4) != 83))) {
++        std::fprintf(stderr, "[dtm-mod] invalid DB5 type catalog\n");
+         return false;
+     }
+     auto relative = dtm_variant_first_sector;
+@@ -402,6 +415,7 @@
+         const auto number = assignment.find("13/CKL");
+         at[number] = '2';
+         at[number + 1] = '0';
++        if (has_type) std::copy_n("DB5", 3, at + number + 3);
+         return true;
+     };
+     if (!apply_assignment(expected) ||
+@@ -417,7 +431,7 @@
+             return false;
+         }
+     }
+-    if (free_race && !append_free_race_driver(mod->events)) {
++    if (free_race && !append_free_race_driver(mod->events, has_type)) {
+         std::fprintf(stderr, "[dtm-mod] could not add the car to the DTM Free Race roster\n");
+         return false;
+     }
+@@ -702,6 +716,12 @@
+ bool dtm_variant_record(std::uint32_t filename, std::uint32_t record) {
+     if (!g_dtm_variant || record > kRamSize - 16u) return false;
+     const auto path = upper(std::string(guest_name(filename)));
++    if (!g_dtm_variant->files[dtm_variant_type_index].empty() && path == "CARS\\SHADOWS\\DB5.SHD") {
++        // Reuse the template shadow until the imported body has its own shadow mesh.
++        constexpr std::string_view shadow_directory = "CARS\\SHADOWS\\";
++        std::copy_n("CKL", 3, g_ram + filename + shadow_directory.size());
++        return false;
++    }
+     for (std::size_t i = 0; i < dtm_variant_files.size(); ++i) {
+         const auto &bytes = g_dtm_variant->files[i];
+         if (bytes.empty() || path != dtm_variant_files[i].path) continue;

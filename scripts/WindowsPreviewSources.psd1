@@ -31,6 +31,7 @@
         'ps2-native-recomp-v0.0.5-dtm-free-race.patch'
         'ps2-native-recomp-v0.0.5-dtm-converted-model.patch'
         'ps2-native-recomp-v0.0.5-dtm-variant-sound.patch'
+        'ps2-native-recomp-v0.0.5-dtm-variant-type.patch'
     )
     DependencyArchives = @(
         'busybox-w64u-FRP-6075-g169694ebd.exe'
