@@ -166,6 +166,8 @@ The 12 stock RD3 `.px` cockpit models tested share a little-endian offset at fil
 
 The RD3 preview command recognizes the stock triangle strips in all 12 models. It exports local positions and UVs grouped by draw section and file offset. The DTM model has 20 draw sections with 378 strips and 1,975 non-degenerate triangles. The OBJ preview omits the scene transforms, attachment animation, and material state needed to import a working cockpit.
 
+In the stock files, each draw section has a 40-byte header followed by a VIF payload. The word immediately before the payload gives its length, a multiple of 16 bytes. The following word belongs to the next section header, or is the final zero word at the end of the file. A local Windows test replaced the first DTM draw section with the 64 strips of the DB5 main cockpit body under its own model name. The altered package reached the race with the donor geometry loaded. The test used untextured surfaces and left the remaining cockpit objects and camera settings from the DTM template.
+
 ### Test the legacy DB5 sound banks
 
 Build the Windows launcher with the variant sound patch from the source manifest, then create a separate pack with `--donor-sound`.

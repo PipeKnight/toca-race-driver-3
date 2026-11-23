@@ -29,15 +29,16 @@ def cockpit_sections(data):
         raise ValueError("Missing cockpit draw sections")
     sections = []
     for index in range(count):
-        if first > len(data) - 52 or read_word(data, first) != 0x6c018000:
+        if (first > len(data) - 52 or read_word(data, first) != 0x6c018000
+                or read_word(data, first - 40) != 1 or read_word(data, first - 8) != 0):
             raise ValueError(f"Invalid cockpit draw section {index}")
         size = read_word(data, first - 4)
-        end = first + size + 4
-        if size < 52 or size % 4 or end > len(data):
+        end = first + size
+        if size < 52 or size % 16 or end > len(data) - 4:
             raise ValueError(f"Invalid cockpit draw section extent at {first:#x}")
         sections.append((first, end))
-        first = end + 36
-    if end != len(data):
+        first = end + 40
+    if end != len(data) - 4 or read_word(data, end) != 0:
         raise ValueError("Unexpected data after the last cockpit draw section")
     return sections
 
