@@ -20,6 +20,7 @@ from BuildTrackCollisionOverlay import (
 )
 from BuildTrackGeometryOverlay import DMA_BYTES, DMA_SECTOR
 from Ps2TrackCollision import collision_append, collision_export
+from Ps2TrackScene import scene_append, scene_info
 
 
 REFERENCE_PACKAGES = {
@@ -283,11 +284,13 @@ def main():
         ("collision-surface", "copy a triangle's surface type within a collision mesh", collision_surface),
         ("collision-export", "export a PS2 collision mesh as a triangle OBJ in game coordinates", collision_export),
         ("collision-append", "add triangles from an OBJ to an existing PS2 collision mesh", collision_append),
+        ("scene-info", "list track scene roots with usable material leaves", scene_info),
+        ("scene-append", "add OBJ triangles to a PS2 track scene using a local material", scene_append),
         ("route-obj", "export AILD version 9 routes as flat OBJ polylines", route_obj),
     ):
         command = commands.add_parser(name, help=help_text)
         command.add_argument("input", type=Path)
-        if name != "collision-info":
+        if name not in ("collision-info", "scene-info"):
             command.add_argument("output", type=Path, help="new output file")
         if name == "collision-surface":
             command.add_argument("--triangle", type=int, required=True, help="zero-based destination triangle index")
@@ -296,6 +299,16 @@ def main():
             command.add_argument("--obj", type=Path, required=True, help="triangulated OBJ in game coordinates")
             command.add_argument("--surface-from", type=int, required=True,
                                  help="copy the surface type of this zero-based template triangle")
+        if name == "scene-info":
+            command.add_argument("--near", type=float, nargs=2, default=(0, 0), metavar=("X", "Z"),
+                                 help="choose a nearby material leaf per scene root")
+        if name == "scene-append":
+            command.add_argument("--obj", type=Path, required=True, help="triangulated OBJ in game coordinates")
+            command.add_argument("--root", type=lambda value: int(value, 0), required=True, help="root offset from scene-info")
+            command.add_argument("--leaf", type=lambda value: int(value, 0), required=True,
+                                 help="material leaf offset from scene-info")
+            command.add_argument("--rgb", type=int, nargs=3, metavar=("R", "G", "B"), help="override the material's vertex color")
+            command.add_argument("--offset-y", type=float, default=0, help="shift authored vertices vertically in metres")
         command.set_defaults(run=handler)
     args = parser.parse_args()
     try:

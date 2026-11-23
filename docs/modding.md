@@ -94,6 +94,21 @@ Copy-Item -LiteralPath "$work\TRACK.JPK" -Destination "$trial\TRACK.JPK"
 
 Triangle 1598 supplies asphalt on the reference Road America pack. Test the Sunny course in a separate profile. The physical shape is independent of road rendering, which still comes from `DMA1.JPK`. The importer retains the template's terrain and edge flags, reindexes the existing cell references, and checks the PS2 cache limit for the affected cells. Replacing the entire course still requires a compatible visual scene, route, and event entry.
 
+### Add matching visible geometry
+
+Use the same OBJ and coordinate system for the visual and collision parts of the shape. The visual tool uses a material from the locally extracted scene and projects the X/Z footprint to the texture. `scene-info` reports a compatible material leaf from each root close to the supplied X/Z position. The offsets below apply to the Sunny Road America `trk.dma` from the importer. Use the offsets reported for your actual file when editing another scene.
+
+```powershell
+python scripts/ModAssets.py extract --file "$trial\DMA1.JPK" trk.dma "$work\trk.dma"
+python scripts/ModAssets.py scene-info "$work\trk.dma" --near -20 -500
+python scripts/ModAssets.py scene-append "$work\trk.dma" "$work\trk-authored.dma" --obj "$work\ramp.obj" --root 0x2284 --leaf 0x95910 --rgb 190 146 66 --offset-y 0.015
+python scripts/ModAssets.py replace --file "$trial\DMA1.JPK" trk.dma "$work\trk-authored.dma" "$work\DMA1.JPK"
+Copy-Item -LiteralPath "$work\DMA1.JPK" -Destination "$trial\DMA1.JPK"
+.\TocaRecomp.exe --disc 'D:\Games\TOCA Race Driver 3.iso' --road-america $trial --data-dir "$work\test-player"
+```
+
+The 1.5 cm visual offset keeps near-coplanar ramp edges visible against the underlying road. The optional RGB values tint the reused material and retain its original alpha. Launch the Sunny Road America session to test this pair. Additional material layouts, author-supplied textures, and standalone track scenes need their own verification. [PS2 scene authoring](ps2-disc-and-archives.md#authoring-ps2-visible-track-geometry)
+
 ## Cars
 
 Start with a DTM car. The verified PS2 archive for the class is `CARDATA\DTMX\DTMX.JPK`. Its directory includes the Audi A4 `.mdl` and `.msh` pair, textures, `CarParts.big`, and variant packages such as `dtmx_00.big`. The two model files are a paired PS2 format. The [RD3_BD7sTools](https://github.com/BuilderDemo7/RD3_BD7sTools) project targets conversion from PSP track `.p3d` to PC `.px` and is still under development. The ZModeler Race Driver filter documents the desktop mesh workflow and the shared part map layout. [PS2 comparison](ps2-disc-and-archives.md#stock-ps2-dtm-models-and-oschersleben-collision)

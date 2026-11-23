@@ -12,12 +12,64 @@ from BuildRoadAmericaMod import (
     A1_RING, ROAD_AMERICA, event_catalog, read_bigf, repack_bigf, track_catalog, unpack_lzss,
 )
 from BuildTrackCollisionOverlay import encode_lzss, encode_lzss_compact
+from BuildTrackGeometryOverlay import FOOTER, RELOCATION, VERTEX as SCENE_VERTEX, vif_commands
 from ModAssets import find_member, replace_member
 from Ps2CarModel import mesh_export, mesh_import, mesh_packets
 from Ps2TrackCollision import CELL, GRID_CELLS, POLYGON, REFERENCE, TRIANGLE, VERTEX, Collision, collision_append
+from Ps2TrackScene import Scene, scene_append
 
 
 class ModAssetTests(unittest.TestCase):
+    def test_scene_append_links_a_new_root_and_serializes_authored_positions(self):
+        base, root, leaf, packet_at = 0x200000, 0x10, 0x30, 0xa0
+        packet = struct.pack("<5I", 0x6c018000, 0x100, 3, 0x107, 0)
+        for i in range(7):
+            packet += struct.pack("<I", 0x6c010100 + i)
+            if i == 6:
+                giftag = 1 << 46 | 4 << 47 | 3
+                packet += struct.pack("<2Q", giftag, 0x512)
+            else:
+                packet += bytes(16)
+        packet += struct.pack("<I6f", 0x74030107, 0, 0, 1, 0, 0, 1)
+        packet += struct.pack("<I", 0x6e030108) + bytes((70, 80, 90, 128)) * 3
+        packet += struct.pack("<I9f", 0x68030109, 0, 0, 0, 3, 0, 0, 0, 0, 4)
+        packet += struct.pack("<2I", 0x10000000, 0x17000000)
+        packet += bytes(-len(packet) % 16)
+        payload = bytearray(packet_at)
+        struct.pack_into("<I", payload, 0, base + root)
+        struct.pack_into("<3I", payload, root, len(packet), base + leaf, base + packet_at)
+        struct.pack_into("<2I", payload, leaf, 0x30000000 | len(packet) // 16, base + packet_at)
+        struct.pack_into("<I", payload, leaf + 0x40, len(packet))
+        struct.pack_into("<I", payload, leaf + 0x48, base + packet_at)
+        struct.pack_into("<I", payload, leaf + 0x60, 1)
+        payload.extend(packet)
+        relocations = [(0, 0), (root + 4, 0), (root + 8, 0), (root + 24, 0), (leaf, 3), (leaf + 0x48, 0)]
+        original = payload + b"".join(RELOCATION.pack(*row) for row in relocations)
+        original += FOOTER.pack(len(relocations), len(payload), base)
+
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            template, obj, output = work / "stock.dma", work / "new.obj", work / "authored.dma"
+            template.write_bytes(original)
+            obj.write_text("v 10 3 20\nv 13 4 20\nv 10 3 24\nf 1 2 3\n", encoding="ascii")
+            scene_append(SimpleNamespace(input=template, output=output, obj=obj, root=root, leaf=leaf,
+                                         rgb=(1, 2, 3), offset_y=0.5))
+            scene = Scene(output.read_bytes())
+
+        self.assertEqual(scene.data[packet_at:packet_at + len(packet)], packet)
+        self.assertEqual(scene.roots[0], root)
+        added_root, = scene.roots[1:]
+        added_leaf, = scene.leaves(added_root)
+        material = scene.material(added_root, added_leaf)
+        self.assertEqual(material.colors, bytes((1, 2, 3, 128)) * 3)
+        start = scene.word(added_leaf + 4) - scene.base
+        length = scene.word(added_leaf + 0x40)
+        positions, = (c for c in vif_commands(scene.data, start, start + length) if c.operation == 0x68)
+        self.assertEqual(tuple(SCENE_VERTEX.iter_unpack(scene.data[positions.payload:positions.payload + positions.size])),
+                         ((10, 3.5, 20), (13, 4.5, 20), (10, 3.5, 24)))
+        self.assertEqual(SCENE_VERTEX.unpack_from(scene.data, added_leaf + 0x20), (10, 3.5, 20))
+        self.assertEqual(SCENE_VERTEX.unpack_from(scene.data, added_leaf + 0x30), (13, 4.5, 24))
+
     def test_collision_append_remaps_existing_references_and_adds_the_authored_face(self):
         first_cell, later_cell, existing_reference = 2 * 256 + 2, 220 * 256 + 220, 221 * 256 + 220
         source_vertices = b"".join(VERTEX.pack(0, 100, 200, x, z) for x, z in
