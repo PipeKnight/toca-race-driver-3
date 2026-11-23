@@ -35,7 +35,7 @@ python scripts/Ps2CarModel.py model-info "$work\mercedes.mdl" "$work\mercedes.ms
 
 Export the positions to CSV, edit the `x`, `y`, and `z` columns, then import the result into a new copy of the same mesh. Keep the header, packet indices, vertex indices, and row order. Test an unedited export and import first. The two mesh hashes should match. A uniform scale is a useful first experiment because the stored normals retain the same directions.
 
-Use `mesh-preview` to open the strips in an OBJ editor. The preview includes the stored positions, normals, and UVs grouped by packet. These are local mesh coordinates. Scene placement, materials, and any clipping decisions made by VU programs require additional decoding. Use the CSV for writing position changes back to PS2 data.
+Use `mesh-preview` to open the strips in an OBJ editor. The preview includes the stored positions, normals, and UVs grouped by packet. These are local mesh coordinates. Scene placement, materials, and any clipping decisions made by VU programs require additional decoding.
 
 ```powershell
 python scripts/Ps2CarModel.py mesh-preview "$work\mercedes-hi.msh" "$work\mercedes-hi.obj"
@@ -57,7 +57,16 @@ To replace the class mesh inside `DTMX.JPK`, export and import that mesh separat
 python scripts/ModAssets.py replace --disc $disc --package dtm-cars DTM_C_Klasse.msh "$work\mercedes-class-edited.msh" "$mod\DTMX.JPK"
 ```
 
-The CSV workflow edits positions in existing streams. New topology, texture coordinates, generated normals, part and damage mappings for a new model, and standalone car registration still need authoring tools and in-game verification.
+## Replace selected mesh packets from OBJ
+
+Use `mesh-preview` to identify the mesh regions and their zero-based packet numbers. Work in the template's local coordinates. The Mercedes uses X across the car, Y up, and Z along its length. Export just the authored faces in groups named `packet_N`, with `N` identifying the template packet. The importer uses triangulated faces and requires a texture coordinate on every corner. It reads supplied normals or calculates a face normal. Share positions, UVs, and normals along the edges of a smooth strip to fit more triangles into the same packet.
+
+```powershell
+python scripts/Ps2CarModel.py mesh-replace "$work\mercedes-hi.msh" "$work\roof-scoop.obj" "$mod\DTM_C_KLASSE_HI.MSH"
+.\TocaRecomp.exe --disc 'D:\Discs\TOCA Race Driver 3.iso' --dtm-mod $mod
+```
+
+The importer writes position, normal, and UV streams into the selected packets. It joins disconnected faces with degenerate triangles and pads the rest of the strip with repeated vertices. Each group must fit its template packet's vertex count. The file extent, relocation table, material bindings, and VU command positions keep their original layout. For a different detail level, locate and edit its own mesh packets. Part and damage mapping, custom textures, and registration as a separate car have their own acceptance items.
 
 ## Windows verification
 
@@ -66,3 +75,9 @@ The single-executable candidate built a fresh backend from the reference ISO. Tw
 A separate run enabled only a rebuilt `DTMX.JPK` with a changed vertex in the class-package Mercedes mesh. The game loaded that package and the edited vertex appeared at the original packet location in EE RAM. Both edited runs reached frame 3720. Local evidence is under `local/dtm-modding/`, including `stock/frames/frame_03700.png`, `hi-edit/frames/frame_03700.png`, and `low-edit/trace.log`.
 
 A combined Direct3D 12 run reached the Road America Clio Cup race with the DTM overlay also enabled. Its frame 8347 capture matched the previous Road America candidate byte for byte. Direct launcher checks selected the stock, DTM, and combined cards as expected. The launcher rejected an empty DTM mod directory and a truncated high-detail file before starting the game.
+
+### Authored roof intake
+
+Replaced high-detail Mercedes packets 135 and 136 with an original two-sided, 16-triangle roof intake. The new triangles used 10 strip vertices per side within the template capacities of 12 and 11. All six replacement position, normal, and UV streams matched EE RAM. The 369,788-byte mesh differed from the template in 570 attribute bytes. The matched Windows Direct3D 12 captures at frame 3700 differed by 566 pixels within a 39 × 28 region around the roof. The local OBJ and overlay are under `local/dtm-authored/`, and the captures are under `local/dtm-modding/authored-roof/`.
+
+The standard Windows runner replayed the final lap at Oschersleben from frame 3250 through the post-race cutscene at frame 9300. All 404 replay checkpoints matched. The intake remained visible on the final straight as the race faded out. The replay trace and captures are under `local/dtm-authored/replay/`.

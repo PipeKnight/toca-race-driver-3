@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Inspect PS2 DTM model pairs and edit the position streams of their meshes."""
+"""Inspect PS2 DTM model pairs and edit the vertex streams of their meshes."""
 
 import argparse
 from collections import Counter
@@ -177,6 +177,101 @@ def mesh_preview(args):
         stream.writelines(output)
 
 
+def obj_index(value, values):
+    index = int(value)
+    offset = index - 1 if index > 0 else len(values) + index
+    if not index or not 0 <= offset < len(values):
+        raise ValueError("OBJ index refers to a missing attribute")
+    return values[offset]
+
+
+def unit_vector(point):
+    length = math.hypot(*point)
+    if not length:
+        raise ValueError("OBJ contains a zero-length normal or a degenerate triangle")
+    return tuple(value / length for value in point)
+
+
+def read_obj_packets(path):
+    attributes = {"v": (VERTEX, []), "vt": (UV, []), "vn": (VERTEX, [])}
+    positions, texcoords, normals = (attributes[key][1] for key in ("v", "vt", "vn"))
+    groups = {}
+    packet = None
+    with path.open(encoding="utf-8-sig") as stream:
+        for number, line in enumerate(stream, 1):
+            fields = line.partition("#")[0].split()
+            if not fields:
+                continue
+            label, *values = fields
+            if label in attributes:
+                layout, target = attributes[label]
+                data = tuple(map(float, values))
+                if len(data) * 4 != layout.size or not all(map(math.isfinite, data)):
+                    raise ValueError(f"Invalid {label} on OBJ line {number}")
+                target.append(layout.unpack(layout.pack(*data)))
+            elif label == "g":
+                name = values[0] if len(values) == 1 else ""
+                suffix = name.removeprefix("packet_")
+                packet = int(suffix) if name.startswith("packet_") and suffix.isascii() and suffix.isdecimal() else None
+            elif label == "f":
+                if packet is None or len(values) != 3:
+                    raise ValueError(f"Expected a triangle in a packet_N group on OBJ line {number}")
+                corners = [value.split("/") for value in values]
+                if any(not 2 <= len(corner) <= 3 or not corner[1] for corner in corners):
+                    raise ValueError(f"OBJ line {number} needs a texture coordinate per corner")
+                points = [obj_index(corner[0], positions) for corner in corners]
+                a, b, c = points
+                ab = tuple(v - u for u, v in zip(a, b))
+                ac = tuple(v - u for u, v in zip(a, c))
+                normal = unit_vector((ab[1] * ac[2] - ab[2] * ac[1], ab[2] * ac[0] - ab[0] * ac[2],
+                                      ab[0] * ac[1] - ab[1] * ac[0]))
+                face = []
+                for point, corner in zip(points, corners):
+                    uv = obj_index(corner[1], texcoords)
+                    direction = unit_vector(obj_index(corner[2], normals)) if len(corner) == 3 and corner[2] else normal
+                    face.append((point, uv, direction))
+                groups.setdefault(packet, []).append(tuple(face))
+    if not groups:
+        raise ValueError("OBJ contains no packet triangles")
+    return groups
+
+
+def triangle_strip(faces):
+    strip = list(faces[0])
+    for face in faces[1:]:
+        # Match the ordered edge after applying the strip's alternating winding.
+        tail = tuple(strip[-2:])
+        if len(strip) % 2:
+            tail = tail[::-1]
+        for i in range(3):
+            if (face[i], face[(i + 1) % 3]) == tail:
+                strip.append(face[(i + 2) % 3])
+                break
+        else:
+            a, b, c = face if len(strip) % 2 == 0 else (face[1], face[0], face[2])
+            strip.extend((strip[-1], a, a, b, c))
+    return strip
+
+
+def mesh_replace(args):
+    data = bytearray(args.mesh.read_bytes())
+    _, packets = mesh_packets(data)
+    for index, faces in read_obj_packets(args.obj).items():
+        if index >= len(packets) or not packets[index].triangle_strip:
+            raise ValueError(f"Packet {index} has no supported triangle strip")
+        packet = packets[index]
+        strip = triangle_strip(faces)
+        if len(strip) > packet.count:
+            raise ValueError(f"Packet {index} needs {len(strip)} strip vertices and has room for {packet.count}")
+        strip.extend([strip[-1]] * (packet.count - len(strip)))
+        for vertex, (point, uv, normal) in enumerate(strip):
+            VERTEX.pack_into(data, packet.position + vertex * VERTEX.size, *point)
+            VERTEX.pack_into(data, packet.normal + vertex * VERTEX.size, *normal)
+            UV.pack_into(data, packet.uv + vertex * UV.size, *uv)
+    with args.output.open("xb") as stream:
+        stream.write(data)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -198,6 +293,11 @@ def main():
     preview.add_argument("mesh", type=Path)
     preview.add_argument("output", type=Path)
     preview.set_defaults(run=mesh_preview)
+    replace = commands.add_parser("mesh-replace", help="replace selected car mesh packets with triangulated OBJ geometry")
+    replace.add_argument("mesh", type=Path, help="template mesh providing the packet capacities and materials")
+    replace.add_argument("obj", type=Path, help="triangles with UVs in packet_N groups")
+    replace.add_argument("output", type=Path)
+    replace.set_defaults(run=mesh_replace)
     args = parser.parse_args()
     try:
         args.run(args)

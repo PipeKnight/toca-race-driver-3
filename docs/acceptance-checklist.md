@@ -63,6 +63,7 @@ The first release target is the North American PS2 disc `SLUS-21182` v1.02. Play
 ## Separate modding milestone
 
 - [x] Edit a stock PS2 vehicle mesh and load it through the portable Windows backend. Verify the standalone high-detail mesh and an independent class-package edit in the Mercedes DTM race. [DTM verification](ps2-dtm-models.md#windows-verification)
+- [x] Import independently authored triangles with UVs and normals into a high-detail PS2 vehicle mesh and verify the new part during a race. [Authored roof intake](ps2-dtm-models.md#authored-roof-intake)
 - [x] Document the PS2 modding workflow and verify archive tools against the reference disc. Round-trip a DTM part map, repack a nested edit, and load an edited Road America collision surface in a Direct3D 12 race. [Modding guide](modding.md)
 - [x] Import an independently authored collision shape and verify it in a track slot. The 14-triangle OBJ hump matched the guest collision data, raised the Clio by about one metre in the matched-input test, and allowed a full Time Trial lap with a cold-loaded ghost. [PS2 collision authoring](ps2-disc-and-archives.md#authoring-ps2-collision)
 - [x] Import matching visible geometry from OBJ and verify it together with the new collision. Road America rendered the 14 authored triangles, completed a **2:38.46** Time Trial lap, and showed the autosaved ghost after a cold launch. [PS2 scene authoring](ps2-disc-and-archives.md#authoring-ps2-visible-track-geometry)

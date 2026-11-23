@@ -15,7 +15,7 @@ from BuildRoadAmericaMod import (
 from BuildTrackCollisionOverlay import encode_lzss, encode_lzss_compact
 from BuildTrackGeometryOverlay import FOOTER, RELOCATION, VERTEX as SCENE_VERTEX, vif_commands
 from ModAssets import find_member, replace_member
-from Ps2CarModel import mesh_export, mesh_import, mesh_packets
+from Ps2CarModel import UV, mesh_export, mesh_import, mesh_packets, mesh_replace
 from Ps2TrackCollision import CELL, GRID_CELLS, POLYGON, REFERENCE, TRIANGLE, VERTEX, Collision, collision_append
 from Ps2TrackRoute import EVENT, MAGIC, POINT, SECTION, read_route, route_export, route_import
 from Ps2TrackScene import Scene, scene_append
@@ -334,6 +334,47 @@ class ModAssetTests(unittest.TestCase):
             mesh_import(SimpleNamespace(mesh=stock, positions=positions, output=output))
             struct.pack_into("<f", mesh, streams[0].position, 0.8)
             self.assertEqual(output.read_bytes(), mesh)
+
+    def test_car_obj_replacement_packs_independent_faces_into_fixed_capacity(self):
+        count = 9
+        mesh = bytearray(struct.pack("<9I", 0x6c028000, 1, 2, 0x40, count, 0x60, 6, 0, 0))
+        for command, width in ((0x64090040, 8), (0x68090042, 12), (0x68090060, 12)):
+            mesh.extend(struct.pack("<I", command) + bytes(count * width))
+        gif = count | 1 << 46 | 4 << 47 | 3 << 60
+        mesh.extend(struct.pack("<IQQ", 0x6c010090, gif, 0x512))
+        call = len(mesh)
+        mesh.extend(struct.pack("<I", 0x14000001))
+        mesh.extend(bytes(-len(mesh) % 16))
+        mesh.extend(struct.pack("<5I", call, 4, 1, len(mesh), 0x02bd0b60))
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            source, obj, output = work / "source.msh", work / "new.obj", work / "new.msh"
+            source.write_bytes(mesh)
+            obj.write_text("g packet_0\nv 0 0 0\nv 0 0 1\nv 1 0 0\nv 2 0 0\nv 2 0 1\nv 3 0 0\n"
+                           "vt 0 0\nvt 0 1\nvt 1 0\nf 1/1 2/2 3/3\nf -3/1 -2/2 -1/3\n", encoding="ascii")
+            args = SimpleNamespace(mesh=source, obj=obj, output=output)
+            mesh_replace(args)
+            edited = output.read_bytes()
+            self.assertEqual(len(edited), len(mesh))
+            base, (stream,) = mesh_packets(edited)
+            self.assertEqual((base, stream.count), (0x02bd0b60, count))
+            corners = list(SCENE_VERTEX.iter_unpack(edited[stream.position:stream.position + count * 12]))
+            faces = []
+            for i in range(count - 2):
+                a, b, c = corners[i:i + 3]
+                if len({a, b, c}) == 3:
+                    faces.append((b, a, c) if i % 2 else (a, b, c))
+            self.assertEqual(faces, [((0, 0, 0), (0, 0, 1), (1, 0, 0)),
+                                     ((2, 0, 0), (2, 0, 1), (3, 0, 0))])
+            self.assertEqual(UV.unpack_from(edited, stream.uv + 5 * UV.size), (0, 1))
+            self.assertEqual(SCENE_VERTEX.unpack_from(edited, stream.normal), (0, 1, 0))
+            self.assertEqual(edited[call:], mesh[call:])
+            with obj.open("a", encoding="ascii") as stream:
+                stream.write("f 1/1 2/2 3/3\n")
+            args.output = work / "too-large.msh"
+            with self.assertRaisesRegex(ValueError, "has room for 9"):
+                mesh_replace(args)
+            self.assertFalse(args.output.exists())
 
     @staticmethod
     def package():
