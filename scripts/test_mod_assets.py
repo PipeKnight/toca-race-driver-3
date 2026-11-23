@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import unittest
 
 from BuildRoadAmericaMod import (
-    A1_RING, ROAD_AMERICA, event_catalog, read_bigf, repack_bigf, track_catalog, unpack_lzss,
+    A1_RING, ROAD_AMERICA, TrackEntry, event_catalog, read_bigf, repack_bigf, track_catalog, unpack_lzss,
 )
 from BuildTrackCollisionOverlay import encode_lzss, encode_lzss_compact
 from BuildTrackGeometryOverlay import FOOTER, RELOCATION, VERTEX as SCENE_VERTEX, vif_commands
@@ -133,14 +133,21 @@ class ModAssetTests(unittest.TestCase):
             template, obj, output = work / "stock.dma", work / "new.obj", work / "authored.dma"
             template.write_bytes(original)
             obj.write_text("v 10 3 20\nv 13 4 20\nv 10 3 24\nf 1 2 3\n", encoding="ascii")
-            scene_append(SimpleNamespace(input=template, output=output, obj=obj, root=root, leaf=leaf,
-                                         rgb=(1, 2, 3), offset_y=0.5))
+            args = SimpleNamespace(command="scene-append", input=template, output=output, obj=obj, root=root, leaf=leaf,
+                                   rgb=(1, 2, 3), offset_y=0.5)
+            scene_append(args)
             scene = Scene(output.read_bytes())
+            args.command = "scene-replace"
+            args.output = work / "replacement.dma"
+            scene_append(args)
+            replacement = Scene(args.output.read_bytes())
 
         self.assertEqual(scene.data[packet_at:packet_at + len(packet)], packet)
         self.assertEqual(scene.roots[0], root)
         added_root, = scene.roots[1:]
         added_leaf, = scene.leaves(added_root)
+        self.assertEqual(replacement.roots, [added_root])
+        self.assertEqual(list(replacement.leaves(added_root)), [added_leaf])
         material = scene.material(added_root, added_leaf)
         self.assertEqual(material.colors, bytes((1, 2, 3, 128)) * 3)
         start = scene.word(added_leaf + 4) - scene.base
@@ -170,8 +177,13 @@ class ModAssetTests(unittest.TestCase):
             template, obj, output = root / "stock.col", root / "hump.obj", root / "edited.col"
             template.write_bytes(original)
             obj.write_text("v 10 3 30\nv 14 3 30\nv 10 3 34\nf -3 -2 -1\n", encoding="ascii")
-            collision_append(SimpleNamespace(input=template, output=output, obj=obj, surface_from=0))
+            args = SimpleNamespace(command="collision-append", input=template, output=output, obj=obj, surface_from=0)
+            collision_append(args)
             mesh = Collision(output.read_bytes())
+            args.command = "collision-build"
+            args.output = root / "replacement.col"
+            collision_append(args)
+            replacement = Collision(args.output.read_bytes())
 
         self.assertEqual(mesh.flags, flags)
         self.assertEqual(mesh.raw_vertices[:len(source_vertices)], source_vertices)
@@ -183,22 +195,33 @@ class ModAssetTests(unittest.TestCase):
         self.assertEqual(in_cell(existing_reference), (2,))
         self.assertEqual(in_cell(33 * 256 + 13), (1,))
         self.assertAlmostEqual(mesh.world(mesh.vertices[6])[1], 3, places=3)
+        self.assertEqual(replacement.triangles, ((0, 1, 2),))
+        self.assertEqual(replacement.polygons, POLYGON.pack(0xffff, 7, 0))
+        self.assertEqual(replacement.flags, bytes(len(flags)))
+        for actual, expected in zip(replacement.world(replacement.vertices[0]), (10, 3, 30)):
+            self.assertAlmostEqual(actual, expected, places=3)
 
     def test_track_catalog_moves_directory_base_for_separate_imported_slots(self):
-        reserved = {course.record for course in (ROAD_AMERICA, *A1_RING)}
+        foundry = TrackEntry("tqa4", "Foundry Oval", "0.702", 36)
+        reserved = {course.record for course in (ROAD_AMERICA, *A1_RING, foundry)}
         stock = {
             f"c{index:03}.ini".encode("ascii"): f"HOFIndex = {index}\r\n".encode("ascii")
-            for index in range(83) if index not in reserved
+            for index in range(84) if index not in reserved
         }
         original = repack_bigf(b"BIGF" + bytes(0x4800 - 4), stock, 0x7C0, 0x800, 0x4300)
         legacy, legacy_base = read_bigf(track_catalog(original), 81)
-        expanded, base = read_bigf(track_catalog(original, (ROAD_AMERICA, *A1_RING)), 83)
+        expanded_catalog = track_catalog(original, (ROAD_AMERICA, *A1_RING))
+        expanded, base = read_bigf(expanded_catalog, 83)
         self.assertEqual(legacy_base, 0x7C0)
         self.assertEqual(base, 0x800)
         self.assertEqual({name: expanded[name] for name in legacy}, legacy)
         for course in A1_RING:
             label = course.name.encode("ascii")
             self.assertIn(b"FullName = " + label + b"\r\n", expanded[f"{course.slot}.ini".encode("ascii")])
+        fourth, base = read_bigf(track_catalog(expanded_catalog, (foundry,), existing=83), 84)
+        self.assertEqual(base, 0x820)
+        self.assertIn(b"HOFIndex = 36\r\n", fourth.pop(b"tqa4.ini"))
+        self.assertEqual(fourth, expanded)
 
     def test_only_new_a1_ring_calendar_rounds_offer_sunny_weather(self):
         calendar = (
@@ -222,6 +245,17 @@ class ModAssetTests(unittest.TestCase):
             self.assertIn(b"WeatherProb1=100\r\n", body)
             self.assertNotIn(b"Weather2", body)
             self.assertNotIn(b"WeatherProb2", body)
+        foundry = TrackEntry("tqa4", "Foundry Oval", "0.702", 36)
+        existing = event_catalog(original, (ROAD_AMERICA, *A1_RING))
+        fourth, _ = read_bigf(event_catalog(existing, (foundry,), existing_rounds=13, add_oschersleben=False), 204)
+        added = fourth.pop(b"rccuf.ini")
+        self.assertEqual(fourth, other)
+        first, last = added.split(b"[Race 14]\r\n")
+        self.assertIn(b"RacesNum=14\r\n", first)
+        self.assertEqual(first.count(b"TrackID=osc1\r\n"), 1)
+        self.assertIn(b"TrackID=tqa4\r\n", last)
+        self.assertIn(b"WeatherProb1=100\r\n", last)
+        self.assertNotIn(b"Weather2=RAIN", last)
 
     def test_equal_lengths_mark_a_raw_jpak_member_even_with_lzss_flag(self):
         package = self.package()

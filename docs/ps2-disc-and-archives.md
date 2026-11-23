@@ -360,3 +360,13 @@ On A1-Ring Short, the main route grew from 114 to 116 stations, the pit route fr
 The ordinary Windows preview 5 backend loaded the full resized route in EE RAM in Time Trial (`0x00c86700`) and Free Race (`0x0127b240`). The Racing Clio completed Time Trial in **1:13.20**, and the game restored the ghost after a cold launch. The card passed the filesystem and ECC checks and kept its hash through the cold run, which read 357 pages and wrote zero. The local files are under `local/route-resize/` and `local/a1-ring-pack/short-route-resize-trial/` and `short-route-resize-reload/`. [Resize instructions](modding.md#add-or-remove-route-stations)
 
 The old Free Race recording lost its line in the changed traffic. A new controller recording took the resized course through Race Results on the ordinary preview 5 runner. The replay matched 348 checkpoints, classified Player One 16th of 20 in **1:20.73**, and autosaved. The card passed filesystem and ECC checks after 772 page writes. The recording, captures, and card are in `local/route-resize/` and `local/a1-ring-pack/short-route-resize-classification/`.
+
+### Foundry Oval
+
+The fourth optional slot adds `tqa4.ini` with record index 36, extends `rccuf.ini` with a sunny Clio Cup round, and reads `tqa4/TRACK.JPK` and `tqa4/DMA1.JPK`. The expanded track catalog moved its directory base to `0x820` and preserved all existing records. The launcher uses the pack's existing `--road-america` path and handles older pack sizes as before. [Build the oval](modding.md#build-and-play-foundry-oval)
+
+The oval's route is 701.59 m long with 72 main stations, 37 pit stations, and 17 auxiliary stations. The authored collision contains 171 vertices and 288 triangles, and the renderer uses separate authored ground and road meshes. The route and packed vertex stream matched guest memory at `0x0127b240` and `0x0127daa8` on the race grid. The collision uses a single local surface type. The loading screen and texture state use the reference resources.
+
+On Windows 11 Direct3D 12, the Autosport Clio Cup race finished with Player One **4th of 20 in 33.03 seconds**. The runner with the fourth-slot patch matched all 162 replay checkpoints and triggered the autosave. The card passed filesystem and ECC checks after 772 page writes. A cold process reached the main menu after reading 341 pages and writing zero, with the original card hash. Local evidence is in `local/a1-ring-pack/short-foundry-oval-grid/`, `short-foundry-oval-results/`, and `short-foundry-race-reload/`.
+
+Time Trial reached the course and counted laps in the initial authoring tests. The test runs left the road, and the game did not record a best lap. Repeat that check after refining the route and the run-off behavior.

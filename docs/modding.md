@@ -140,6 +140,19 @@ Copy-Item -LiteralPath "$work\DMA1.JPK" -Destination "$trial\DMA1.JPK"
 
 The 1.5 cm visual offset keeps near-coplanar ramp edges visible against the underlying road. The optional RGB values tint the reused material and retain its original alpha. Launch the Sunny Road America session to test this pair. Additional material layouts, author-supplied textures, and standalone track scenes need their own verification. [PS2 scene authoring](ps2-disc-and-archives.md#authoring-ps2-visible-track-geometry)
 
+### Build and play Foundry Oval
+
+Foundry Oval is a 702 m demonstration circuit with its own race route, road mesh, and collision. It occupies `tqa4` in Windows preview 6 alongside the three imported circuits. Start with the unmodified expanded pack built from both of your PS2 disc copies. The builder puts the new pack in its own directory.
+
+```powershell
+python scripts/BuildFoundryOval.py 'D:\Mods\Road America and A1-Ring' 'D:\Mods\Foundry Pack'
+.\TocaRecomp.exe --disc 'D:\Games\TOCA Race Driver 3.iso' --road-america 'D:\Mods\Foundry Pack' --data-dir 'D:\Mods\Foundry Player'
+```
+
+In **Free Race**, choose **Autosport Clio Cup**, then **Foundry Oval**. The same circuit is available in Time Trial. It uses the reference loading screen and a material from your Road America pack. The flat collision surface extends into the run-off area, and the demonstration has no barriers.
+
+For another circuit, work on a copy of this pack and edit its `tqa4` resources. `collision-build` generates a new `col.col` from the supplied triangulated OBJ, taking a surface type from the template. `scene-replace` substitutes the root of `trk.dma` with the supplied OBJ mesh and the selected local material. Use `scene-append` for a second surface or mesh. Supply a matching `AILD` route in `osc1.big/osc1.ail`. See `scripts/BuildFoundryOval.py` for an example that generates all three assets. [Route editing](#edit-route-lanes-and-checkpoints) · [Foundry Oval verification](ps2-disc-and-archives.md#foundry-oval)
+
 ## Cars
 
 Start with a DTM car. The verified PS2 archive for the class is `CARDATA\DTMX\DTMX.JPK`. Its directory includes the Audi A4 `.mdl` and `.msh` pair, textures, `CarParts.big`, and variant packages such as `dtmx_00.big`. The two model files are a paired PS2 format. The [RD3_BD7sTools](https://github.com/BuilderDemo7/RD3_BD7sTools) project targets conversion from PSP track `.p3d` to PC `.px` and is still under development. The ZModeler Race Driver filter documents the desktop mesh workflow and the shared part map layout. [PS2 comparison](ps2-disc-and-archives.md#stock-ps2-dtm-models-and-oschersleben-collision)

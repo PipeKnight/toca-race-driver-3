@@ -2,7 +2,7 @@
 
 The launcher packages the first-run setup for Windows 11 x64. Supply your own North American PS2 disc, `SLUS-21182` v1.02, as an ISO, a matching DVD CHD, or a directory of extracted disc files. Keep the disc available at launch. The launcher builds the runner locally and reads the original disc in place. The package includes the launcher, setup scripts, patches, and pinned upstream source archives.
 
-The current Windows release, `v0.1.0-preview.3`, ships as a single portable `TocaRecomp.exe`. It reloads the previous preview's saves and settings and adds optional Road America and DTM overlays. Clean installation was verified in Windows Sandbox with software graphics. Direct3D 12 race tests used an existing Windows installation. [Windows x64 release](https://github.com/PipeKnight/toca-race-driver-3/releases/tag/v0.1.0-preview.3)
+Windows `v0.1.0-preview.6` ships as a single portable `TocaRecomp.exe`. It adds a fourth optional circuit slot for Foundry Oval and retains support for earlier circuit packs and DTM overlays. Clean installation uses Windows Sandbox with software graphics. Direct3D 12 race tests use an existing Windows 11 installation. [Windows x64 release](https://github.com/PipeKnight/toca-race-driver-3/releases/tag/v0.1.0-preview.6)
 
 The earlier `0.1.0-preview.1` archive requires its `support` directory next to `TocaRecomp.exe`. [Previous Windows release](https://github.com/PipeKnight/toca-race-driver-3/releases/tag/v0.1.0-preview.1)
 
@@ -58,6 +58,10 @@ Connect the controller before launching. Use a fresh data directory to test prof
 Finish an event, wait for autosave, and close the game. Use `--direct --fullscreen` with the same data and setup directories to confirm that the profile and progress load. The data directory contains `logs/ps2run_*.log`. With `PS2_PAD_LOG=1`, the log records the controller name and input transitions for the guest ports. This run provides physical input and driver coverage on the existing installation. The clean desktop release test uses the full combination in a fresh installation.
 
 ## Verification
+
+### Windows preview 6 release
+
+The release executable SHA-256 is `ff1f7c00485fee3e01190022e066c7dcd5372cc0b03ff22c74f44dc2577ac00f`. The exact executable completed an offline first launch from the reference ISO and pinned dependencies in Windows 11 Sandbox build `26100.9606`. Direct reuse kept the same runner hash. A previous-preview Sprintcar profile and its settings loaded through frame 3120 with 341 card page reads and zero writes. The four-course pack and DTM overlay booted together through frame 150. On the Windows 11 host, the fourth-slot runner finished the authored Foundry Oval, and the same four-slot configuration opened the dedicated Road America Rain packages. [Foundry Oval verification](ps2-disc-and-archives.md#foundry-oval)
 
 ### Windows preview 5 release
 

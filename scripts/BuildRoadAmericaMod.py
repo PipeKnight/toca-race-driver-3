@@ -31,11 +31,15 @@ ROAD_AMERICA_RAIN_DONOR_SECTOR = 976987
 
 
 @dataclass(frozen=True)
-class Course:
+class TrackEntry:
     slot: str
     name: str
     km: str
     record: int
+
+
+@dataclass(frozen=True)
+class Course(TrackEntry):
     donor_prefix: str
     route_package: tuple[int, int, int]  # Sector, BIGF entry count, expected .aid size.
     scene_package: tuple[int, int, int]  # Sector, BIGF entry count, expected col.col size.
@@ -79,8 +83,8 @@ def repack_bigf(original, members, base, start, limit):
     return result
 
 
-def track_catalog(original, courses=(ROAD_AMERICA,)):
-    members, base = read_bigf(original, 80)
+def track_catalog(original, courses=(ROAD_AMERICA,), *, existing=80):
+    members, base = read_bigf(original, existing)
     index = re.compile(rb"(?mi)^HOFIndex[ \t]*=[ \t]*(\d+)[ \t]*\r?$")
     indices = {int(index.search(record)[1]) for record in members.values() if index.search(record)}
     if len(indices) != len(members):
@@ -95,28 +99,30 @@ def track_catalog(original, courses=(ROAD_AMERICA,)):
             f"FullName = {course.name}\r\nPitSide = LEFT\r\nHOFIndex = {course.record}\r\nLengthInKm = {course.km}"
         ).encode("ascii")
     base = max(base, (0x24 + len(members) * BIGF_ENTRY.size + 31) & ~31)
-    return repack_bigf(original, members, base, 0x800, 0x4300)
+    return repack_bigf(original, members, base, max(base, 0x800), 0x4300)
 
 
-def event_catalog(original, courses=(ROAD_AMERICA,)):
+def event_catalog(original, courses=(ROAD_AMERICA,), *, existing_rounds=9, add_oschersleben=True):
     members, base = read_bigf(original, 204)
     event = members[b"rccuf.ini"]
-    number = re.compile(rb"(?mi)^RacesNum([ \t]*=[ \t]*)9(?=[ \t]*\r?$)")
+    number = re.compile(rb"(?mi)^RacesNum([ \t]*=[ \t]*)(\d+)(?=[ \t]*\r?$)")
+    total = number.search(event)
     template = re.search(rb"(?ms)^\[Race 1\]\r?\n(.*?)(?=\r?\n\[)", event)
-    if not template or not number.search(event):
+    if not template or not total or int(total[2]) != existing_rounds:
         raise ValueError("Unexpected Clio Cup Free Race calendar")
     source = template[1].rstrip(b"\r\n")
     rounds = []
-    tracks = (b"osc1",) + tuple(course.slot.encode("ascii") for course in courses)
-    for number_value, track in enumerate(tracks, 10):
+    stock = (b"osc1",) if add_oschersleben else ()
+    tracks = stock + tuple(course.slot.encode("ascii") for course in courses)
+    for number_value, track in enumerate(tracks, existing_rounds + 1):
         body, replacements = re.subn(rb"(?mi)^(TrackID[ \t]*=[ \t]*)hoc3", rb"\g<1>" + track, source)
         if replacements != 1:
             raise ValueError("Unexpected Clio Cup track reference")
-        if track in (b"tqa2", b"tqa3"):
+        if track not in (b"osc1", b"tqa1"):
             body = re.sub(rb"(?mi)^Weather2[^\r\n]*\r?\n|^WeatherProb2[^\r\n]*\r?\n", b"", body)
             body = re.sub(rb"(?mi)^(WeatherProb1[ \t]*=[ \t]*)90", rb"\g<1>100", body)
         rounds.append(f"[Race {number_value}]\r\n".encode("ascii") + body)
-    updated = number.sub(lambda match: b"RacesNum" + match[1] + str(9 + len(tracks)).encode("ascii"),
+    updated = number.sub(lambda match: b"RacesNum" + match[1] + str(existing_rounds + len(tracks)).encode("ascii"),
                          event, count=1).rstrip(b"\r\n\0")
     members[b"rccuf.ini"] = updated + b"\r\n\r\n" + b"\r\n\r\n".join(rounds) + b"\r\n"
     return repack_bigf(original, members, base, (base + 31) & ~31, len(original))

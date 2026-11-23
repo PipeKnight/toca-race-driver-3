@@ -204,7 +204,11 @@ def scene_append(args):
     WORD.pack_into(root, 4, scene.base + leaf_at)
     WORD.pack_into(root, 8, scene.base + packet_at)
     result = bytearray(scene.data[:scene.size])
-    WORD.pack_into(result, material.root + 24, scene.base + root_at)
+    if args.command == "scene-replace":
+        WORD.pack_into(root, 24, 0)
+        WORD.pack_into(result, 0, scene.base + root_at)
+    else:
+        WORD.pack_into(result, material.root + 24, scene.base + root_at)
     result.extend(packet + leaf + root)
     rows = list(scene.rows)
     for old, new, length in ((material.leaf, leaf_at, TARGET_NODE_BYTES), (material.root, root_at, ROOT_BYTES)):

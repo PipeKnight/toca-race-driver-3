@@ -48,12 +48,13 @@ def donor_collision(archive):
         return read_exact(stream, start + data_offset + offset, size)
 
 
-def collision_counts(data):
+def collision_counts(data, *, allow_empty=False):
     bounds = struct.unpack_from("<6f", data)
     grid_bytes, triangles, vertices, reserved = struct.unpack_from("<4I", data, 24)
     index_offset = 40 + vertices * 8 + triangles * 4
     grid_offset = index_offset + triangles * 6
-    if (not vertices or not triangles or reserved
+    if ((not vertices or not triangles) and not (allow_empty and vertices == triangles == 0)
+            or reserved
             or not all(math.isfinite(value) for value in bounds)
             or not all(lower < upper for lower, upper in zip(bounds[:3], bounds[3:]))
             or grid_offset + grid_bytes > len(data)):

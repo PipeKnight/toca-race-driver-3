@@ -1,4 +1,4 @@
-"""Read PS2 collision meshes and add authored triangles to their spatial grid."""
+"""Read and build PS2 collision meshes with a spatial grid."""
 
 from collections import defaultdict
 import math
@@ -22,8 +22,8 @@ CELL_CAPACITY = 0x4f0 // 4 - 13
 
 
 class Collision:
-    def __init__(self, data):
-        vertex_count, triangle_count = collision_counts(data)
+    def __init__(self, data, *, allow_empty=False):
+        vertex_count, triangle_count = collision_counts(data, allow_empty=allow_empty)
         polygon_start = 40 + vertex_count * VERTEX.size
         index_start = polygon_start + triangle_count * POLYGON.size
         grid_start = index_start + triangle_count * TRIANGLE.size
@@ -148,6 +148,27 @@ def collision_append(args):
         raise ValueError("Surface source triangle is outside the template mesh")
     surface = mesh.polygons[args.surface_from * POLYGON.size + 2]
     raw, faces = read_triangles(args.obj)
+    if args.command == "collision-build":
+        if not all(math.isfinite(value) and abs(value) <= 100000 for point in raw for value in point):
+            raise ValueError("Invalid authored collision coordinate")
+        axes = tuple(zip(*raw))
+        minimum = tuple(min(axis) for axis in axes)
+        maximum = tuple(max(axis) for axis in axes)
+        # Broader horizontal bounds leave room in the 16-bit cell reference table.
+        padding = (max(2, maximum[0] - minimum[0]), 2, max(2, maximum[2] - minimum[2]))
+        low = tuple(value - margin for value, margin in zip(minimum, padding))
+        high = tuple(value + margin for value, margin in zip(maximum, padding))
+        grid = bytes(GRID_CELLS * CELL.size)
+        flags = bytes(len(mesh.flags))
+        header = struct.pack("<6f4I", *low, *high, len(grid), 0, 0, 0)
+        mesh = Collision(header + grid + flags, allow_empty=True)
+
+    result = append_triangles(mesh, raw, faces, surface)
+    with args.output.open("xb") as stream:
+        stream.write(result)
+
+
+def append_triangles(mesh, raw, faces, surface):
     if len(mesh.vertices) + len(raw) > 65536 or len(mesh.triangles) + len(faces) > 65535:
         raise ValueError("Added geometry exceeds the 16-bit vertex or triangle limit")
     vertices = tuple(mesh.packed(p) for p in raw)
@@ -218,8 +239,7 @@ def collision_append(args):
         result.extend(bytes(-len(result) % 4))
         result.extend(mesh.flags)
     Collision(result)
-    with args.output.open("xb") as stream:
-        stream.write(result)
+    return result
 
 
 def collision_export(args):

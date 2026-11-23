@@ -256,8 +256,10 @@ def main():
         ("collision-surface", "copy a triangle's surface type within a collision mesh", collision_surface),
         ("collision-export", "export a PS2 collision mesh as a triangle OBJ in game coordinates", collision_export),
         ("collision-append", "add triangles from an OBJ to an existing PS2 collision mesh", collision_append),
+        ("collision-build", "build a PS2 collision mesh from an OBJ using a local surface type", collision_append),
         ("scene-info", "list track scene roots with usable material leaves", scene_info),
         ("scene-append", "add OBJ triangles to a PS2 track scene using a local material", scene_append),
+        ("scene-replace", "replace the displayed track mesh with OBJ triangles using a local material", scene_append),
         ("route-obj", "export AILD version 9 routes as flat OBJ polylines", route_obj),
         ("route-export", "export AILD version 9 stations and markers to CSV", route_export),
         ("route-import", "rebuild an AILD version 9 route from a station CSV and template", route_import),
@@ -269,14 +271,14 @@ def main():
         if name == "collision-surface":
             command.add_argument("--triangle", type=int, required=True, help="zero-based destination triangle index")
             command.add_argument("--from-triangle", type=int, required=True, help="zero-based source triangle index")
-        if name == "collision-append":
+        if name in ("collision-append", "collision-build"):
             command.add_argument("--obj", type=Path, required=True, help="triangulated OBJ in game coordinates")
             command.add_argument("--surface-from", type=int, required=True,
                                  help="copy the surface type of this zero-based template triangle")
         if name == "scene-info":
             command.add_argument("--near", type=float, nargs=2, default=(0, 0), metavar=("X", "Z"),
                                  help="choose a nearby material leaf per scene root")
-        if name == "scene-append":
+        if name in ("scene-append", "scene-replace"):
             command.add_argument("--obj", type=Path, required=True, help="triangulated OBJ in game coordinates")
             command.add_argument("--root", type=lambda value: int(value, 0), required=True, help="root offset from scene-info")
             command.add_argument("--leaf", type=lambda value: int(value, 0), required=True,
