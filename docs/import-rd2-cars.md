@@ -20,4 +20,6 @@ python scripts/Ps2CarModel.py model-info local\db5-model\car.mdl local\db5-model
 
 `convert` accepts livery IDs from `catalog`. It emits a development model, split detail-level meshes, textures, and a part map for the supported RD2 geometry layout. This is not a playable pack: it does not invent a car type, assign event slots, or convert mechanics, damage, engine sounds, cockpit attachments, or shadows automatically. Check the model in game before adding a preset. In particular, verify wheel and suspension motion at all detail levels, material bindings, damage, and a separate registration.
 
+The model-only conversion has been exercised with the DB5 (`vc_2`), Jaguar E-Type (`vc_0`), and 1968 Mustang (`vc_4`) from the Vintage class. Only the DB5 has a playable preset, with its remaining work listed in the [acceptance checklist](acceptance-checklist.md#aston-martin-db5-completion).
+
 A future donor such as Colin McRae: DiRT will need its own archive reader and format converter. RD2-specific disc identification is deliberately kept separate from the RD3 packaging workflow.

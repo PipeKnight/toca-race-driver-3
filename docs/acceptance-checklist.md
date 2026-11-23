@@ -76,6 +76,8 @@ The first release target is the North American PS2 disc `SLUS-21182` v1.02. Play
 - [x] Change the station counts of the main, pit, and auxiliary route sections. Validate their data in guest memory, preserve neighboring archive members, and verify Time Trial ghost reload and Free Race classification with autosave. [Route resizing](ps2-disc-and-archives.md#resizing-the-route-tables)
 - [x] Register a separately authored demonstration circuit with its own visible road, collision, and route. Foundry Oval starts in the fourth imported slot and finishes a 20-car Free Race with autosave. [Foundry Oval](ps2-disc-and-archives.md#foundry-oval)
 - [x] Record a valid Foundry Oval Time Trial lap and restore its ghost under the fourth slot after a cold launch. The corrected sector sequence saved a **39.45** ghost and played it in the next session without writing to the card. [Foundry Oval Time Trial](ps2-disc-and-archives.md#foundry-oval-time-trial-sectors)
+- [x] Build Tsukuba Circuit from authored source in a fifth slot. Save a **1:29.77** Racing Clio ghost and replay it after a cold launch without modifying the saved card. [Tsukuba authoring and validation](author-a-circuit.md#test-the-track-in-game)
+- [ ] Finish a clean, classified Tsukuba Free Race with the stock rules and confirm the opponents can complete the course. Investigate the early field collisions before treating the AI route as accepted. [Tsukuba authoring and validation](author-a-circuit.md#test-the-track-in-game)
 - [x] Finish a race in an additional track slot using stock geometry, collision, and race data. QA Circuit finished an Autosport Clio Cup Free Race on Windows 11. [QA Circuit race](ps2-disc-and-archives.md#finish-a-race-in-qa-circuit)
 - [x] Finish a race with donor collision and converted route data. The Road America QA Circuit probe reached Race Results in 20th with a classified time of 3:25.21, including a 20-second penalty. [Road America import probes](ps2-disc-and-archives.md#road-america-import-probes)
 - [x] Verify Road America rendering around a full lap and confirm race completion with the corrected scene. The Windows 11 Direct3D 12 run finished in 3:06.68 without a penalty. [Road America geometry conversion](ps2-disc-and-archives.md#road-america-geometry-conversion)
@@ -90,5 +92,15 @@ The first release target is the North American PS2 disc `SLUS-21182` v1.02. Play
 - [ ] Demonstrate a replaceable track and car from independently created assets. For additional slots, verify registration, selection, collisions, checkpoints, AI paths, and stable saves. Track RD3_BD7sTools collaboration in the project plan.
 
 Custom tracks and cars have their own acceptance criteria. The recompilation can reach its first release using the original disc content.
+
+### Aston Martin DB5 completion
+
+Keep the DB5 as the reference car for the RD2 importer. Complete this checklist before treating its preset as finished or moving on to the Peugeot 205.
+
+- [ ] Correct both exterior door materials and replace the Mercedes shadow with a DB5-specific shadow. Inspect both sides in the selector, on the grid, and under chase and replay cameras.
+- [ ] Finish the right-hand-drive cockpit: door trim, steering wheel and its motion, instruments, wipers, mirrors, and their attachment points. Verify the instruments respond while driving, exercise the wipers in a supported wet race, and switch into and out of the cockpit repeatedly.
+- [ ] Observe wheel rotation, steering, and suspension travel across LODs 0–4 on the player and AI cars. Check for jumps in wheel position or missing parts at each transition. Repeat after damage and compare with a stock control car.
+- [ ] Compare the player and AI engine mix, loop transitions, and gear-change samples with the original RD2 car. Confirm stock RD3 cars keep their normal audio on the same build.
+- [ ] Verify the DB5's name and separate records on a cold launch. Finish the intro and a classified Free Race with the current donor cockpit and sound enabled, then replay the same inputs on the normal runner and check the autosave. Older QA Touring results do not close this item.
 
 See the [Windows verification evidence](native-recompilation.md) and [project rules](../AGENTS.md) for the build procedure and release requirements.
