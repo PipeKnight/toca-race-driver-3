@@ -4,10 +4,11 @@ This guide uses the North American PS2 disc `SLUS-21182` v1.02 and the portable 
 
 | I want to… | Start here |
 | --- | --- |
-| Import a Race Driver 2 circuit | Build the local donor pack from both PS2 discs and install it in Free Race. [Road America import](ps2-disc-and-archives.md#play-road-america-from-your-own-discs) |
+| Import a Race Driver 2 circuit | Build Road America and both A1-Ring layouts from the two PS2 discs. [Race Driver 2 import guide](race-driver-2-import.md#convert-road-america-and-a1-ring) |
 | Build an original circuit | Start with the working Foundry Oval slot, then replace the road mesh, collision, and AI route together. [Foundry Oval example](#build-and-play-foundry-oval) |
 | Put my own geometry on a working car | Export one detail level of the DTM car as OBJ, author the replacement faces, and test an overlay. [DTM model workflow](ps2-dtm-models.md#replace-selected-mesh-packets-from-obj) |
 | Test a new car variant alongside the original cars | Build the additional DTM variant and drive it in the introductory race or select it in DTM Free Race. [Additional DTM variant](#test-an-additional-dtm-variant) |
+| Prepare a Race Driver 2 car for porting | Extract the Aston Martin DB5 and export its PS2 body by detail level. [Race Driver 2 car extraction](race-driver-2-import.md#extract-and-preview-the-aston-martin-db5) |
 
 ## Inspect and extract files
 
@@ -162,7 +163,13 @@ In **Free Race**, choose **Autosport Clio Cup**, then **Foundry Oval**. The same
 
 To enable ghost saving on a previously generated Foundry pack, run the current builder with a new output directory. Launch that pack with the same Windows preview 6 executable. In Time Trial, choose **New** in the ghost menu, select a slot, and acknowledge the confirmation. Drive an opening pass at a lower pace, then complete a faster full lap with both sector splits. End the session to save the recording. [Time Trial verification](ps2-disc-and-archives.md#foundry-oval-time-trial-sectors)
 
-For another circuit, work on a copy of this pack and edit its `tqa4` resources. `collision-build` generates a new `col.col` from the supplied triangulated OBJ, taking a surface type from the template. `scene-replace` substitutes the root of `trk.dma` with the supplied OBJ mesh and the selected local material. Use `scene-append` for a second surface or mesh. Supply a matching `AILD` route in `osc1.big/osc1.ail`. See `scripts/BuildFoundryOval.py` for an example that generates all three assets. [Route editing](#edit-route-lanes-and-checkpoints) · [Foundry Oval verification](ps2-disc-and-archives.md#foundry-oval)
+#### Adapt the slot to your own layout
+
+1. Copy the whole generated pack to a new directory and work on its `tqa4` files. Build a closed road mesh and a collision mesh from the same layout. Use metres with Y up, and point the drivable collision faces upward. Include run-off geometry where cars can leave the road.
+2. Extract `col.col` from `tqa4/TRACK.JPK` and use `collision-info` to choose a drivable template surface. Run `collision-build` with your triangulated collision OBJ, then put the result back into the same member. [Collision commands](#add-a-new-collision-shape)
+3. Extract `trk.dma` from `tqa4/DMA1.JPK`. Run `scene-info` to identify a root and its material leaf in that file. Run `scene-replace` for the authored road and `scene-append` for additional surfaces that use the local material. Put the result back into `trk.dma`. [Visible geometry commands](#add-matching-visible-geometry)
+4. Build a matching main route in driving order, with the start, checkpoints, and sector splits on the new road. Keep the pit and auxiliary sections consistent with the lap boundary. The Foundry builder shows how to generate the station coordinates, normals, distances, and event markers. Put the resulting route in `tqa4/TRACK.JPK → osc1.big → osc1.ail`. [Route editing](#edit-route-lanes-and-checkpoints)
+5. Test the starting direction, collisions, opponent paths, and one classified lap. In Time Trial, save a ghost, quit, relaunch with the same data directory, and load the ghost. The example builder registers the slot as Foundry Oval. Changing its display name and lap length also requires the corresponding entry in `tracks.big`. [Foundry Oval verification](ps2-disc-and-archives.md#foundry-oval)
 
 ## Cars
 

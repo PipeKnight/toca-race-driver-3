@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Inspect, extract, and edit assets from the reference Race Driver 3 PS2 disc."""
+"""Inspect, extract, and edit assets from the reference Race Driver PS2 discs."""
 
 import argparse
 from collections import Counter
@@ -14,7 +14,7 @@ from BuildRoadAmericaMod import (
     jpak_entries, repack_jpak, unpack_lzss,
 )
 from BuildTrackCollisionOverlay import (
-    BIGF_ENTRY, REFERENCE_DIRECTORY_HASH, SECTOR_SIZE, TRACK_BYTES, TRACK_SECTOR,
+    BIGF_ENTRY, DONOR_DIRECTORY_HASH, REFERENCE_DIRECTORY_HASH, SECTOR_SIZE, TRACK_BYTES, TRACK_SECTOR,
     collision_counts, encode_lzss, encode_lzss_compact, read_exact, verify_directory,
 )
 from BuildTrackGeometryOverlay import DMA_BYTES, DMA_SECTOR
@@ -126,16 +126,22 @@ def replace_member(archive, chain, replacement, *, nested=False):
 def read_package(args):
     if args.file:
         if args.package or args.archive_range:
-            raise ValueError("Choose --package or --range only with --disc")
+            raise ValueError("Choose --package or --range with a disc directory")
         return args.file.read_bytes()
+    if args.rd2_disc and args.archive_range is None:
+        raise ValueError("Choose an RD2 archive range with --range")
     if args.package is None and args.archive_range is None:
         raise ValueError("Choose a reference package with --package or an archive range with --range")
-    verify_directory(args.disc / "RDH.DIR", REFERENCE_DIRECTORY_HASH)
+    if args.rd2_disc:
+        disc, prefix, directory_hash = args.rd2_disc, "RD2", DONOR_DIRECTORY_HASH
+    else:
+        disc, prefix, directory_hash = args.disc, "RDH", REFERENCE_DIRECTORY_HASH
+    verify_directory(disc / f"{prefix}.DIR", directory_hash)
     part, sector, size = args.archive_range if args.archive_range else REFERENCE_PACKAGES[args.package]
     offset = sector * SECTOR_SIZE
     if part not in (0, 1, 2) or offset < 0 or size <= 0:
         raise ValueError("Expected archive 0–2, a nonnegative sector, and a positive byte count")
-    archive = args.disc / f"RDH_{part}.HUG"
+    archive = disc / f"{prefix}_{part}.HUG"
     with archive.open("rb") as stream:
         if offset + size > stream.seek(0, 2):
             raise ValueError("The selected range extends past the HUG archive")
@@ -242,6 +248,8 @@ def main():
         else:
             source.add_argument("--file", type=Path, help="local BIGF or JPAK package")
         source.add_argument("--disc", type=Path, help="mounted or extracted SLUS-21182 v1.02 DVD directory")
+        source.add_argument("--rd2-disc", type=Path,
+                            help="mounted or extracted SLES-52638 v1.02 DVD directory, requires --range")
         location = command.add_mutually_exclusive_group()
         location.add_argument("--package", choices=REFERENCE_PACKAGES, help="known package on the reference disc")
         location.add_argument("--range", dest="archive_range", nargs=3, type=int, metavar=("HUG", "SECTOR", "BYTES"),

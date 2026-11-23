@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Inspect PS2 DTM model pairs and edit the vertex streams of their meshes."""
+"""Inspect PS2 Race Driver car model pairs and edit their mesh vertex streams."""
 
 import argparse
 from bisect import bisect_left
@@ -237,19 +237,23 @@ def mesh_preview(args):
     indices = range(len(packets))
     if (args.model is None) != (args.lod is None):
         raise ValueError("Supply both --model and --lod to preview one detail level")
+    if args.combined_lods and args.model is None:
+        raise ValueError("Supply --model and --lod with --combined-lods")
     if args.model is not None:
         model = args.model.read_bytes()
         _, _, _, sections = model_sections(model)
         high, standard = struct.unpack_from("<2I", model, 0x30)
-        reference = high if args.lod == 0 else standard
+        reference = high if args.lod == 0 and not args.combined_lods else standard
         if base != reference:
             raise ValueError(f"The mesh base does not match the model's LOD {args.lod} reference")
-        detail_sections = sections[:1] if args.lod == 0 else sections[1:]
+        detail_sections = sections
+        if not args.combined_lods:
+            detail_sections = sections[:1] if args.lod == 0 else sections[1:]
         ranges = lod_packet_ranges(model, detail_sections, reference, relocation_table(data)[0], packets)
-        indices = ranges[max(0, args.lod - 1)]
+        indices = ranges[args.lod if args.combined_lods else max(0, args.lod - 1)]
     if not all(packets[index].triangle_strip for index in indices):
         raise ValueError("An input packet lacks a supported triangle-strip GIF template")
-    output = ["# PS2 DTM strip preview in local mesh coordinates.\n"]
+    output = ["# PS2 car strip preview in local mesh coordinates.\n"]
     first = 1
     for index in indices:
         packet = packets[index]
@@ -389,6 +393,8 @@ def main():
     preview.add_argument("output", type=Path)
     preview.add_argument("--model", type=Path, help="matching .mdl for a single detail level")
     preview.add_argument("--lod", type=int, choices=range(5), help="0 for high detail, or 1 to 4 for class mesh detail")
+    preview.add_argument("--combined-lods", action="store_true",
+                         help="use the RD2 mesh layout containing all five detail levels")
     preview.set_defaults(run=mesh_preview)
     replace = commands.add_parser("mesh-replace", help="replace selected car mesh packets with triangulated OBJ geometry")
     replace.add_argument("mesh", type=Path, help="template mesh providing the packet capacities and materials")

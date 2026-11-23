@@ -9,7 +9,7 @@ The current test target is the North American PS2 release, `SLUS-21182` v1.02. T
 - [Linux developer build](docs/linux-development.md)
 - [Supported disc and archive research](docs/ps2-disc-and-archives.md)
 - [PS2 track and car modding guide](docs/modding.md)
-- [Build and play the experimental Road America add-on](docs/ps2-disc-and-archives.md#play-road-america-from-your-own-discs)
+- [Import PS2 Race Driver 2 circuits and inspect donor cars](docs/race-driver-2-import.md)
 - [Project plan](PLAN.md) and [acceptance checklist](docs/acceptance-checklist.md)
 
 This repository contains project documentation, build tooling, and patches. Supply your own disc data when building and running the game. The [upstream license notice](patches/LICENSE) applies to upstream code in the patches.
