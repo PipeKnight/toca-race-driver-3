@@ -15,16 +15,92 @@ from BuildRoadAmericaMod import (
 from BuildTrackCollisionOverlay import encode_lzss, encode_lzss_compact
 from BuildTrackGeometryOverlay import FOOTER, RELOCATION, VERTEX as SCENE_VERTEX, vif_commands
 from ConvertRd2CarModel import convert_draw_transforms, convert_textures, serialize_relocations
+from ConvertRd2Db5Cockpit import embedded_atlas, replace_draw_strips
 from ModAssets import find_member, replace_member
 from Ps2CarModel import (
     MeshPacket, UV, lod_packet_ranges, mesh_export, mesh_import, mesh_packets, mesh_replace, part_map_coverage,
 )
+from Ps2CockpitModel import cockpit_draw_packets
 from Ps2TrackCollision import CELL, GRID_CELLS, POLYGON, REFERENCE, TRIANGLE, VERTEX, Collision, collision_append
 from Ps2TrackRoute import EVENT, MAGIC, POINT, SECTION, read_route, route_export, route_import
 from Ps2TrackScene import Scene, scene_append
 
 
 class ModAssetTests(unittest.TestCase):
+    def test_cockpit_replacement_rebuilds_the_first_strip_and_rotates_vu_buffers(self):
+        word = struct.Struct("<I")
+
+        def packet(bank, count, setup=()):
+            stream = bank + len(setup) + 1
+            return (struct.pack("<8I", 0x6c018000, bank, count, stream, 0xf5, 0, 0, 0)
+                    + b"".join(setup)
+                    + struct.pack("<IQQ", 0x6c010000 | (stream - 1), (4 << 47) | count, 0x512)
+                    + word.pack(0x74000000 | (count << 16) | stream) + bytes(count * 8)
+                    + word.pack(0x6e004000 | (count << 16) | (stream + 1)) + bytes(count * 4)
+                    + word.pack(0x68000000 | (count << 16) | (stream + 2)) + bytes(count * 12)
+                    + word.pack(0x17000000))
+
+        material = tuple(struct.pack("<IQQ", 0x6c010100 + index, index + 1, 0x0e) for index in range(7))
+        target = packet(0x100, 3, material) + b"".join(packet(bank, 3) for bank in (0x200, 0x300, 0x100))
+        source = bytearray()
+        strips = []
+        for index, count in enumerate((7, 4, 5, 3, 8)):
+            uv = len(source)
+            source.extend(struct.pack("<2f", 0.5, 0.25) * count)
+            positions = len(source)
+            source.extend(struct.pack("<3f", 1, 2, 3 + index) * count)
+            strips.append(SimpleNamespace(count=count, position=positions, uv=uv))
+
+        result, low, high = replace_draw_strips(target, 0, len(target), source, strips)
+        packets = list(cockpit_draw_packets(result, 0, len(result)))
+        self.assertEqual(result[32:172], target[32:172])  # The first draw retains its GS setup.
+        self.assertEqual([word.unpack_from(result, item.start + 4)[0] for item in packets],
+                         [0x100, 0x200, 0x300, 0x100, 0x200])
+        self.assertEqual([item.vertex.count for item in packets], [7, 4, 5, 3, 8])
+        self.assertEqual((low, high), ((1, 2, 3), (1, 2, 7)))
+        for old, new in zip(strips, packets):
+            self.assertEqual(result[new.vertex.payload:new.vertex.payload + new.vertex.size],
+                             source[old.position:old.position + new.vertex.size])
+            self.assertEqual(result[new.uv.payload:new.uv.payload + new.uv.size],
+                             source[old.uv:old.uv + new.uv.size])
+        self.assertEqual(len(result) % 16, 0)
+        word.pack_into(result, 8, 3)
+        with self.assertRaisesRegex(ValueError, "Inconsistent cockpit strip"):
+            list(cockpit_draw_packets(result, 0, len(result)))
+
+    def test_cockpit_atlas_replaces_only_the_embedded_image_and_palette(self):
+        def upload(address, width, height):
+            size = width * height * 4
+            return (struct.pack("<6Q", 0x4000000000000001, 0xeeee, address << 32, 0x50, 0, 0x51)
+                    + struct.pack("<6Q", width | (height << 32), 0x52, 0, 0x53,
+                                  0x0800000000000000 | size // 16, 0)
+                    + bytes(size))
+
+        prefix = b"PS2M" + bytes(28) + struct.pack("<I", 0xf3a0)
+        reference = prefix + upload(0x13180, 64, 64) + upload(0x138bc, 16, 16)
+        reference += b"\xa5" * (0xf3a0 - len(reference)) + b"unchanged scene and draws"
+        image = bytearray(128 * 128)
+        for x, y, value in ((0, 0, 1), (8, 0, 2), (0, 2, 3), (4, 2, 4), (0, 64, 5)):
+            image[y * 128 + x] = value
+        palette = bytes(range(256)) * 4
+
+        result = embedded_atlas(reference, image, palette)
+        first = len(prefix) + 0x60
+        last = first + 0x4000
+        expected = bytearray(0x4000)
+        expected[:4] = b"\x01\0\x02\0"
+        expected[1 + 4 * 4] = 3
+        expected[1] = 4
+        expected[0x2000] = 5
+        self.assertEqual(result[first:last], expected)
+        self.assertEqual(result[last + 0x60:last + 0x460], palette)
+        self.assertEqual((result[:first], result[last:last + 0x60], result[last + 0x460:]),
+                         (reference[:first], reference[last:last + 0x60], reference[last + 0x460:]))
+        with self.assertRaisesRegex(ValueError, "does not fit"):
+            embedded_atlas(reference, image[:-1], palette)
+        with self.assertRaisesRegex(ValueError, "Unexpected DTM cockpit atlas upload"):
+            embedded_atlas(reference[:0x38] + bytes(4) + reference[0x3c:], image, palette)
+
     def test_rd2_class_texture_normalizes_the_embedded_far_texture(self):
         base, target = 0x2e80b80, 0x4bd0b80
         data = bytearray(0x600)

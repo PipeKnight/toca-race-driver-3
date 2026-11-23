@@ -2,12 +2,12 @@
 """Export local-coordinate mesh strips from an RD3 PS2 cockpit model."""
 
 import argparse
-from itertools import islice
+from dataclasses import dataclass
 import math
 from pathlib import Path
 import struct
 
-from BuildTrackGeometryOverlay import read_word, vif_commands
+from BuildTrackGeometryOverlay import VifCommand, read_word, vif_commands
 from Ps2CarModel import UV, VERTEX
 
 
@@ -71,26 +71,53 @@ def cockpit_sections(data):
     return sections
 
 
+@dataclass(frozen=True)
+class CockpitStrip:
+    start: int
+    tag: VifCommand
+    uv: VifCommand
+    color: VifCommand
+    vertex: VifCommand
+    draw: VifCommand
+
+
+def cockpit_draw_packets(data, begin, end):
+    """Read strips in VIF order, including the first strip with its GS setup."""
+    commands = []
+    for command in vif_commands(data, begin, end):
+        if command.operation != 0x17:
+            commands.append(command)
+            continue
+        start = commands[0].payload - 4 if commands else command.payload - 4
+        operations = tuple(item.operation for item in commands)
+        # The first strip has the full material state; some later strips switch it.
+        if (len(commands) < 8 or read_word(data, start) != 0x6c018000
+                or operations[:4] != (0x6c, 0, 0, 0)
+                or operations[-3:] != (0x74, 0x6e, 0x68)
+                or any(item.operation != 0x6c or item.size != 16 for item in commands[4:-3])):
+            raise ValueError(f"Unsupported cockpit triangle strip at {start:#x}")
+        tag, uv, color, vertex = commands[-4:]
+        gif_tag, registers = struct.unpack_from("<QQ", data, tag.payload)
+        bank, count, stream, marker = struct.unpack_from("<4I", data, start + 4)
+        if (registers != 0x512 or (gif_tag >> 47) & 7 != 4 or marker != 0xf5
+                or stream != bank + len(commands[4:-3])
+                or not 3 <= count == vertex.count == uv.count == color.count == (gif_tag & 0x7fff)):
+            raise ValueError(f"Inconsistent cockpit strip at {start:#x}")
+        yield CockpitStrip(start, tag, uv, color, vertex, command)
+        commands.clear()
+    if any(item.operation != 0 for item in commands):
+        raise ValueError(f"Unterminated cockpit draw section at {begin:#x}")
+
+
 def cockpit_strips(data):
-    expected = (0x6c, 0, 0, 0, 0x6c, 0x74, 0x6e, 0x68, 0x17)
     for section, (begin, end) in enumerate(cockpit_sections(data)):
-        for start in range(begin, end - 51, 4):
-            if read_word(data, start) != 0x6c018000 or read_word(data, start + 16) != 0xf5:
-                continue
-            tag, registers = struct.unpack_from("<QQ", data, start + 36)
-            if registers != 0x512 or (tag >> 47) & 7 != 4:
-                continue
-            commands = tuple(islice(vif_commands(data, start, end), len(expected)))
-            if tuple(command.operation for command in commands) != expected:
-                raise ValueError(f"Unsupported cockpit triangle strip at {start:#x}")
-            uv, color, vertex = commands[5:8]
-            if not 3 <= vertex.count == uv.count == color.count == (tag & 0x7fff):
-                raise ValueError(f"Inconsistent cockpit strip length at {start:#x}")
+        for strip in cockpit_draw_packets(data, begin, end):
+            vertex, uv = strip.vertex, strip.uv
             points = tuple(VERTEX.iter_unpack(data[vertex.payload:vertex.payload + vertex.size]))
             texcoords = tuple(UV.iter_unpack(data[uv.payload:uv.payload + uv.size]))
             if not all(math.isfinite(value) for rows in (points, texcoords) for row in rows for value in row):
-                raise ValueError(f"Non-finite cockpit vertex at {start:#x}")
-            yield section, start, points, texcoords
+                raise ValueError(f"Non-finite cockpit vertex at {strip.start:#x}")
+            yield section, strip.start, points, texcoords
 
 
 def preview(data, output):

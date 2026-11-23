@@ -108,7 +108,7 @@ The converter also rebuilt all five LODs of the RD2 Ford Falcon against the RD3 
 
 These outputs are development inputs. A Windows Direct3D 12 diagnostic runner displayed the converted exterior and donor livery in the selector and in the introductory Oschersleben race. Correcting the draw matrix index restored the exterior on track. The DB5 with the converted driving data finished the introductory race in 20th place and advanced to the next cutscene. It completed a separate one-lap Oschersleben Free Race in 3:08.12 in 21st place using scripted controller input. Replaying that race with the patched Windows runner matched all 779 recorded checkpoints and reached Race Results. A barrier impact in the introductory race deformed the bonnet. The one-lap completion fixture used the earlier QA Touring registration.
 
-An Oschersleben traffic check with the player in a stock Vectra showed the AI driving the DB5. DMA captures identified the converted LOD 1–4 meshes as it pulled away. Converting the embedded texture fixed the out-of-range reads at the transition to LOD 4.
+An Oschersleben traffic check with the player in a stock Vectra showed the AI driving the DB5. DMA captures identified the converted LOD 1–4 meshes as it pulled away. Converting the embedded texture fixed the out-of-range reads at the transition to LOD 4. The leading draw groups of the two door parts are now mapped to the donor paint page in LODs 0–3; their RD2 global trim address had rendered as stripes on RD3. The high-detail repair was checked in the selector. The remap changes texture bindings and UVs, not the hinges, vertices, or part table.
 
 ### Find the donor mechanics
 
@@ -122,7 +122,7 @@ foreach ($member in 'Mech.csv', 'SimMech.csv', 'dmg.ini', 'int.ini', 'num.ini') 
 }
 ```
 
-Each RD2 mechanics row has 130 columns. The RD3 QA Touring rows each have 200 columns. Copying the overlapping driving fields into the RD3 rows changed the car's speed at the same frame of a scripted Oschersleben run. The two RD3 tire radius fields use the mean of the corresponding donor tire model heights divided by two. For the DB5 this gives 0.322218 metres on both axles. The full exterior still needs verification when the AI drives the DB5, including the door materials, wheel motion, and suspension through LOD transitions. The remaining RD3 driving fields, sound, and cockpit also need conversion or validation.
+Each RD2 mechanics row has 130 columns. The RD3 QA Touring rows each have 200 columns. Copying the overlapping driving fields into the RD3 rows changed the car's speed at the same frame of a scripted Oschersleben run. The two RD3 tire radius fields use the mean of the corresponding donor tire model heights divided by two. For the DB5 this gives 0.322218 metres on both axles. The remaining RD3-only driving fields retain the template values. The full exterior still needs verification when the AI drives the DB5, including the door materials, wheel motion, and suspension through LOD transitions.
 
 ### Build the experimental pack from both discs
 
@@ -138,7 +138,7 @@ Start the introductory race from a fresh data directory. The builder installs th
 
 The builder adds `DB5` to the 82-entry `Cartype.big` from `RDH_1.HUG` sector 66833. The new record uses the game's existing Aston Martin manufacturer ID `AST` and a separate car record index, 110. It copies the 1450 kg weight from the DB5 mechanics row. The power and acceleration figures still need source data. The car type file, the introductory car offer, and the added DTM roster entry all use `DB5` as the type. The original Mercedes keeps `CKL`. The Free Race variant still requires the DTM event to be unlocked.
 
-The selector requests a separate shadow file using the type ID. The runner redirects `Cars\Shadows\DB5.shd` to the Mercedes template's shadow until the port has a DB5 shadow mesh. A Windows 11 Direct3D 12 selector test showed the DB5 model, its name and 1450 kg in an isolated event fixture. The Mercedes team label remains visible because the added driver shares the original event's team registration.
+The selector requests a separate shadow file using the type ID. The builder generates `db5.shd`, a low-poly body, roof, and four wheel casters sized from the DB5 model. A source-built runner with the DB5 shadow patch loads this file for `Cars\Shadows\DB5.shd` and retains the Mercedes shadow fallback for earlier packs. A matched Windows 11 check showed the different shadow under the DB5 in the introductory race. A separate selector test showed the DB5 model, its name and 1450 kg in an isolated event fixture. The Mercedes team label remains visible because the added driver shares the original event's team registration.
 
 ### Extract the cockpit inputs
 
@@ -160,13 +160,13 @@ python scripts/Ps2CockpitModel.py "$cockpit\int_dtm.px" "$cockpit\int_dtm.obj"
 
 The donor `int.ini` identifies exterior part 2 for the cockpit view and provides the camera, steering, and driver coordinates. The builder copies the donor's exterior binding into the variant's interior configuration. The Mercedes configuration referred to part 115, which the DB5 lacks. It produced horizontal rendering corruption when switching cameras. On Windows 11, using the donor binding restored an intact view when entering and leaving the cockpit camera. The default build uses the Mercedes interior model and camera coordinates.
 
-The OBJ preview exported 2,074 triangles at LOD 0 and 424 at each of LODs 1–4. Change `--lod` and the output filename to inspect the lower levels. Importing the cockpit still requires converting the RD2 mesh pair and texture container, then verifying the part binding on the added variant.
+The RD2 OBJ preview exported 2,074 triangles at LOD 0 and 424 at each of LODs 1–4. Change `--lod` and the output filename to inspect the lower levels. The preview includes all cockpit parts at that level; the current importer transfers only the main shell.
 
 The 12 stock RD3 `.px` cockpit models tested share a little-endian offset at file position `0x20` to a block containing the scene names. At offset `0x24` within that block is the byte length of the null-separated name table, which starts at `0x28`. For `int_dtm.px`, the block starts at `0xf3a0` and the table has 388 bytes. Its names include `int_main_body` and `r_door`. The table also names lights and targets. Match materials and drawable objects separately when mapping the donor cockpit.
 
-The RD3 preview command recognizes the stock triangle strips in all 12 models. It exports local positions and UVs grouped by draw section and file offset, and lists the corresponding scene node names in OBJ comments. The DTM model has 20 draw sections with 378 strips and 1,975 non-degenerate triangles. For example, section 0 belongs to `int_main_body`, and sections 1–4 contain the right wiper and its positions. The OBJ preview omits the scene transforms, attachment animation, and material state needed to import a working cockpit.
+The RD3 preview command recognizes the stock triangle strips in all 12 models. It exports local positions and UVs grouped by draw section and file offset, and lists the corresponding scene node names in OBJ comments. The DTM model has 20 draw sections with 398 strips and 2,189 non-degenerate triangles, including the first strip of each section. For example, section 0 belongs to `int_main_body`, and sections 1–4 contain the right wiper and its positions. The OBJ preview omits the scene transforms, attachment animation, and material state needed to import a working cockpit.
 
-In the stock files, each draw section has a 40-byte header followed by a VIF payload. The word immediately before the payload gives its length, a multiple of 16 bytes. The following word belongs to the next section header, or is the final zero word at the end of the file.
+In the stock files, each draw section has a 40-byte header followed by a VIF payload. The word immediately before the payload gives its length, a multiple of 16 bytes. The following word belongs to the next section header, or is the final zero word at the end of the file. The first strip sets the GS material state and starts at VU buffer `0x100`; subsequent strips cycle through `0x200`, `0x300`, and `0x100`. The converter replaces the whole shell section, including its first strip, while preserving the section's GS setup and leaving the stock scene graph intact.
 
 ### Test the imported cockpit shell
 
@@ -178,9 +178,17 @@ python scripts/BuildRd2Db5Variant.py --rd2-disc $rd2 --disc $rd3 --output $cockp
 & $launcher --disc $rd3Iso --dtm-mod $cockpitPack --data-dir "$work\db5-cockpit-test-player"
 ```
 
-This adds a separate `int_db5.px` and `int_db5.big` inside the DTM package. The model uses the 64 strips of the RD2 cockpit shell from part 119. The texture conversion reads the donor's 256 × 256 indexed atlas and samples it at 128 × 128 to fit the DTM texture allocation. The variant uses the DB5 camera coordinates and right-hand seat. In the Windows 11 Direct3D 12 test, the cockpit view showed the donor dashboard and windshield frame during the introductory Oschersleben race.
+This adds a separate `int_db5.px` and `int_db5.big` inside the DTM package. The builder splits the 64 strips of RD2 part 119 into the main shell and rear mirror assembly. It keeps the right-hand seat and fits the camera behind the restored wheel.
 
-The other cockpit draw sections still come from the DTM template. The steering wheel, instruments, wipers, and mirrors need their own part and material mapping before the full interior can be verified.
+The running game uploads the atlas from the `PS2M` model itself. Changing the companion TIM2 archive alone did not affect matching cockpit captures. The first two embedded GS transfers in the stock DTM model upload the index data and palette at `0x3180` and `0x38bc` in GS blocks. The builder samples the donor's 256 × 256 indexed atlas at 128 × 128, reshuffles the indices for the existing 64 × 64 RGBA32 upload, and copies the palette into the second transfer. Increasing the first upload at its existing address would overwrite the texture at `0x31c0`. The companion archive keeps a matching TIM2 copy in the existing pack layout.
+
+On Windows 11 with Direct3D 12, a matched-input Oschersleben test found the exact converted image and palette bytes in guest RAM. The cockpit frame changed after replacing the embedded uploads; all six sampled menu and non-cockpit frames stayed byte-identical, including the views after switching back out of the cockpit.
+
+With `--donor-cockpit` and `--donor-sound` together, a Windows run drove the scripted final part of the introductory Oschersleben race from a frame-3250 checkpoint made with that same pack. The run reached the post-race cutscene by frame 11000. A separate run repeated the finish with the new shadow. A later 21-car Free Race in the unlocked-event fixture reached Race Results with the donor sound, shadow, wipers, and corrected door paint. Its recorded replay matched 683 checkpoints. This test did not cover cold reloading a DB5 autosave or the normal DTM unlock.
+
+The converter retargets the two wipers from donor parts 79–81 and 83–85. Their geometry and pivot matrices replace the DTM wiper and add a separate left wiper to its scene graph. The third RD3 pose repeats the donor's end pose. A Windows rain fixture showed both blades sweeping; the matching sunny test parked them at the base of the windshield.
+
+The donor trim from cockpit parts 12 and 13 replaces the DTM door panels. Its wheel sprite from exterior part 11 supplies the dimensions of an authored three-spoke wheel on RD3's `steering_wheel` node. Opposite steering inputs changed the spoke angle in Windows captures. The rear mirror uses the donor glass and mount, with RD3's reflective material and remapped UVs. The side-mirror housings retain the RD3 geometry and reflection state, fitted to the donor door pivots. The game can hide mirrors according to its display settings; validating the relocated reflections with that option enabled and adding live instruments remain open.
 
 ### Test the legacy DB5 sound banks
 

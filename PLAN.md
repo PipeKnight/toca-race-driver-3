@@ -27,6 +27,7 @@ Review local disk use while preparing a release. Measure storage reclaimed on th
 
 ## Verification status
 
+- Verified the DB5 cockpit's embedded donor atlas on Windows 11. The matching Oschersleben cockpit capture changed with the new image and palette, and six menu and non-cockpit captures stayed byte-identical. Verified both imported wipers in a rain fixture and the DB5-specific shadow in the intro race. Door materials, other cockpit attachments, and suspension through LOD transitions remain open. [DB5 cockpit verification](docs/race-driver-2-import.md#test-the-imported-cockpit-shell)
 - Packaged Windows `0.1.0-preview.6` as one portable executable. The exact artifact passed offline clean setup, direct reuse, previous-preview save reload, and four-course pack boot alongside the DTM overlay in Windows Sandbox. [Release verification](docs/windows-preview.md#windows-preview-6-release)
 - Prepared Windows `0.1.0-preview.5` as one portable executable. The exact artifact passed clean offline setup, direct reuse, a previous-preview save reload, and an expanded circuit pack and DTM combined boot in Windows Sandbox. Road America Rain now opens its own course. [Release verification](docs/windows-preview.md#windows-preview-5-release)
 - Exported and reimported the position streams of the PS2 DTM meshes. The Windows launcher loaded a visibly rescaled high-detail Mercedes and a separate edit to the class-package mesh. [DTM verification](docs/ps2-dtm-models.md#windows-verification)

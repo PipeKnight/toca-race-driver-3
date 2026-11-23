@@ -97,8 +97,11 @@ Custom tracks and cars have their own acceptance criteria. The recompilation can
 
 Keep the DB5 as the reference car for the RD2 importer. Complete this checklist before treating its preset as finished or moving on to the Peugeot 205.
 
-- [ ] Correct both exterior door materials and replace the Mercedes shadow with a DB5-specific shadow. Inspect both sides in the selector, on the grid, and under chase and replay cameras.
-- [ ] Finish the right-hand-drive cockpit: door trim, steering wheel and its motion, instruments, wipers, mirrors, and their attachment points. Verify the instruments respond while driving, exercise the wipers in a supported wet race, and switch into and out of the cockpit repeatedly.
+- [ ] Verify the repaired exterior door paint on both sides and in moving traffic. The builder remaps both high-detail doors and the matching three class LODs without changing their meshes or hinges.
+- [x] Use a DB5-specific shadow caster sized from its body, roof, and wheels. Verify the change against the Mercedes shadow in a matched Windows race capture.
+- [x] Import both wiper pivots and shapes. Verify their parked positions in Sunny and their sweep in a diagnostic Rain race.
+- [x] Fit the donor door trim and a steering wheel sized from the original part. Verify the steering wheel moves in both directions with controller input.
+- [ ] Finish the live instruments and validate the relocated mirrors with reflections enabled. Verify the instruments respond while driving and switch into and out of the cockpit repeatedly.
 - [ ] Observe wheel rotation, steering, and suspension travel across LODs 0–4 on the player and AI cars. Check for jumps in wheel position or missing parts at each transition. Repeat after damage and compare with a stock control car.
 - [ ] Compare the player and AI engine mix, loop transitions, and gear-change samples with the original RD2 car. Confirm stock RD3 cars keep their normal audio on the same build.
 - [ ] Verify the DB5's name and separate records on a cold launch. Finish the intro and a classified Free Race with the current donor cockpit and sound enabled, then replay the same inputs on the normal runner and check the autosave. Older QA Touring results do not close this item.

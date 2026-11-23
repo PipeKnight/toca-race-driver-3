@@ -13,10 +13,13 @@ from BuildRoadAmericaMod import EVENT_CATALOG_BYTES, EVENT_CATALOG_SECTOR, read_
 from BuildTrackCollisionOverlay import (
     BIGF_ENTRY, DONOR_DIRECTORY_HASH, REFERENCE_DIRECTORY_HASH, SECTOR_SIZE, read_exact, verify_directory,
 )
-from ConvertRd2Db5Cockpit import cockpit_atlas, convert_shell
+from ConvertRd2Db5Cabin import convert_cabin
+from ConvertRd2Db5Cockpit import companion_atlas, convert_shell, convert_wipers, donor_atlas, embedded_atlas
+from ConvertRd2Db5Doors import paint_doors
 from ConvertRd2CarModel import convert_model, convert_textures
 from ModAssets import REFERENCE_PACKAGES, find_member, read_part_map, replace_member
 from Ps2CarModel import model_sections
+from Ps2CarShadow import build_db5_shadow
 
 
 def member(archive, name):
@@ -121,8 +124,12 @@ def build(rd2, rd3, donor_sound=False, donor_cockpit=False):
         raise ValueError("Expected mechanics for RD2 variant vc_2")
 
     target = read_disc_range(rd3, *REFERENCE_PACKAGES["dtm-cars"])
+    donor_model = member(donor_models, "db5.mdl")
+    donor_mesh = member(donor_models, "db5.msh")
     model, high, low, part_map, _, _ = convert_model(
-        member(donor_models, "db5.mdl"), member(donor_models, "db5.msh"), member(target, "DTM_C_Klasse.mdl"))
+        donor_model, donor_mesh, member(target, "DTM_C_Klasse.mdl"))
+    high = paint_doors(model, high, part_map)
+    low = paint_doors(model, low, part_map, lods=(1, 2, 3))
     texture = convert_textures(member(donor_models, "vc_2.tex"), member(target, "dtmx_13.tex"))
     high_texture = convert_textures(
         member(donor_models, "vc_2_hi.tex"), read_disc_range(rd3, 2, 185648, 381204))
@@ -130,12 +137,17 @@ def build(rd2, rd3, donor_sound=False, donor_cockpit=False):
     if donor_cockpit:
         with (rd2 / "RD2_1.HUG").open("rb") as stream:
             donor_interiors = read_exact(stream, 797863 * SECTOR_SIZE, 10001732)
+        image, palette = donor_atlas(member(donor_interiors, "int_db5_hi.tex"))
+        interior_model = member(donor_interiors, "int_db5.mdl")
+        interior_mesh = member(donor_interiors, "int_db5.msh")
+        cockpit = convert_shell(interior_model, interior_mesh, member(target, "int_dtm.px"))
+        cockpit = convert_wipers(interior_model, interior_mesh, cockpit)
+        cockpit = convert_cabin(interior_model, interior_mesh, donor_model, donor_mesh, cockpit, image, palette)
         cockpit_members = (
-            (b"int_db5.px", b"int_dtm.px", convert_shell(
-                member(donor_interiors, "int_db5.mdl"), member(donor_interiors, "int_db5.msh"),
-                member(target, "int_dtm.px"))),
-            (b"int_db5.big", b"int_dtm.big", cockpit_atlas(
-                member(donor_interiors, "int_db5_hi.tex"), member(target, "int_dtm.big"))),
+            (b"int_db5.px", b"int_dtm.px", embedded_atlas(cockpit, image, palette)),
+            # Keep the companion TIM2 archive in the existing 63-member pack layout.
+            (b"int_db5.big", b"int_dtm.big", companion_atlas(
+                member(target, "int_dtm.big"), image, palette)),
         )
     archive = append_variant(target, low, extra_members=cockpit_members)
     variant = member(archive, "dtmx_20.big")
@@ -153,9 +165,13 @@ def build(rd2, rd3, donor_sound=False, donor_cockpit=False):
     if replaced != 1 or read_part_map(part_map)[0][2] == 0xffffffff:
         raise ValueError("The DB5 cockpit exterior part is unavailable")
     if donor_cockpit:
-        # Keep the donor camera and seat side in the template entry's byte budget.
+        # Keep the donor's right-hand seat and put the eye behind the restored wheel and rear mirror.
         interior = b"\r\n".join(line for line in donor_interior.splitlines()
-                               if line and not line.startswith((b"Netting=", b"DigitialDisplay="))) + b"\r\n"
+                                if line and not line.startswith((b"Netting=", b"DigitialDisplay="))) + b"\r\n"
+        camera = b"[Camera]\r\nAngle=-0.16\r\nZoom=1.03\r\nZ=-0.24\r\nY=1.50\r\nX=0.32\r\n"
+        interior, count = re.subn(rb"(?ms)^\[Camera\]\r\n.*?(?=^\[Shift\])", camera, interior)
+        if count != 1:
+            raise ValueError("Expected one DB5 interior camera section")
     changes = {
         "part.map": part_map, "dmg.ini": member(donor_mechanics, "dmg.ini"),
         "type.ini": variant_type.replace(b"type=CKL", b"type=DB5"),
@@ -181,6 +197,7 @@ def build(rd2, rd3, donor_sound=False, donor_cockpit=False):
         "QA_TOURING_HI.MSH": high,
         "events.big": events,
         "cartype.big": car_type_catalog(rd3, donor_mechanics),
+        "db5.shd": build_db5_shadow(donor_model),
     }
     if donor_sound:
         result.update(sound_assets(rd2, rd3))
@@ -193,7 +210,7 @@ def main():
     parser.add_argument("--disc", type=Path, required=True, help="extracted or mounted RD3 PS2 disc")
     parser.add_argument("--output", type=Path, required=True, help="new add-on directory")
     parser.add_argument("--donor-sound", action="store_true", help="add the experimental DB5 legacy samples")
-    parser.add_argument("--donor-cockpit", action="store_true", help="add the experimental DB5 cockpit shell")
+    parser.add_argument("--donor-cockpit", action="store_true", help="add the experimental DB5 cockpit shell and atlas")
     args = parser.parse_args()
     try:
         result = build(args.rd2_disc, args.disc, args.donor_sound, args.donor_cockpit)
