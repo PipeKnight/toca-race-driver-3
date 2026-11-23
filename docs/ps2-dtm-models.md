@@ -62,6 +62,13 @@ Compare the `lod_part_counts` in `model-info` with the matching variant's `part.
 
 All 22 maps in the reference `DTMX.JPK` matched the corresponding model counts. [Part map export workflow](modding.md#inspect-a-car-part-map)
 
+Pass `--part-map` to check the binary map against its model before repacking a variant. The report includes the number of assigned slots and distinct referenced parts at each detail level. An out-of-range entry stops the check and identifies the affected level, slot, and index. Review the part assignments in a mod separately, since a range check alone can accept a valid index attached to the wrong slot.
+
+```powershell
+python scripts/ModAssets.py extract --disc $disc --package dtm-cars --inside dtmx_08.big part.map "$work\mercedes-part.map"
+python scripts/Ps2CarModel.py model-info "$work\mercedes.mdl" "$work\mercedes.msh" --part-map "$work\mercedes-part.map"
+```
+
 ## Edit a mesh while retaining its layout
 
 Export the positions to CSV, edit the `x`, `y`, and `z` columns, then import the result into a new copy of the same mesh. Keep the header, packet indices, vertex indices, and row order. Test an unedited export and import first. The two mesh hashes should match. A uniform scale is a useful first experiment because the stored normals retain the same directions.

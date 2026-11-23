@@ -15,7 +15,9 @@ from BuildRoadAmericaMod import (
 from BuildTrackCollisionOverlay import encode_lzss, encode_lzss_compact
 from BuildTrackGeometryOverlay import FOOTER, RELOCATION, VERTEX as SCENE_VERTEX, vif_commands
 from ModAssets import find_member, replace_member
-from Ps2CarModel import MeshPacket, UV, lod_packet_ranges, mesh_export, mesh_import, mesh_packets, mesh_replace
+from Ps2CarModel import (
+    MeshPacket, UV, lod_packet_ranges, mesh_export, mesh_import, mesh_packets, mesh_replace, part_map_coverage,
+)
 from Ps2TrackCollision import CELL, GRID_CELLS, POLYGON, REFERENCE, TRIANGLE, VERTEX, Collision, collision_append
 from Ps2TrackRoute import EVENT, MAGIC, POINT, SECTION, read_route, route_export, route_import
 from Ps2TrackScene import Scene, scene_append
@@ -348,6 +350,20 @@ class ModAssetTests(unittest.TestCase):
         struct.pack_into("<I", model, 52, base + 80)
         with self.assertRaisesRegex(ValueError, "contiguous mesh blocks"):
             lod_packet_ranges(model, sections, base, 128, packets)
+
+    def test_car_part_map_checks_indices_at_each_detail_level(self):
+        counts = {0: 3, 1: 1}
+        data = bytearray(struct.pack("<9I", 1, 2, 3, 0, 2, 2, 0xffffffff, 0, 0xffffffff))
+        self.assertEqual(part_map_coverage(data, counts), {
+            "entries_per_lod": 3,
+            "lods": {0: {"assigned_slots": 3, "distinct_parts": 2},
+                     1: {"assigned_slots": 1, "distinct_parts": 1}},
+        })
+        struct.pack_into("<I", data, 28, 2)
+        with self.assertRaisesRegex(ValueError, "LOD 1 slot 1 refers to part 2"):
+            part_map_coverage(data, counts)
+        with self.assertRaisesRegex(ValueError, "2 detail levels, expected 1"):
+            part_map_coverage(data, {0: 3})
 
     def test_car_obj_replacement_packs_independent_faces_into_fixed_capacity(self):
         count = 9

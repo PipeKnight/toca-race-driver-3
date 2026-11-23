@@ -12,6 +12,7 @@ from pathlib import Path
 import struct
 
 from BuildTrackGeometryOverlay import FOOTER, RELOCATION, VERTEX, read_word, vif_commands
+from ModAssets import read_part_map
 
 
 STREAM_HEADER = 0x6c028000
@@ -142,6 +143,26 @@ def lod_part_counts(model, sections, base):
     return counts
 
 
+def part_map_coverage(data, counts):
+    lods = read_part_map(data)
+    if len(lods) != len(counts):
+        raise ValueError(f"Part map contains {len(lods)} detail levels, expected {len(counts)}")
+    levels = {}
+    for lod, row in enumerate(lods):
+        used = set()
+        active = 0
+        for slot, part in enumerate(row):
+            if part == 0xffffffff:
+                continue
+            if part >= counts[lod]:
+                raise ValueError(f"Part map LOD {lod} slot {slot} refers to part {part}, "
+                                 f"outside the model's {counts[lod]} parts")
+            used.add(part)
+            active += 1
+        levels[lod] = {"assigned_slots": active, "distinct_parts": len(used)}
+    return {"entries_per_lod": len(lods[0]), "lods": levels}
+
+
 def model_info(args):
     data = args.model.read_bytes()
     payload, base, rows, sections = model_sections(data)
@@ -170,6 +191,8 @@ def model_info(args):
         if len(packets) != read_word(data, starts[lod] + 0x34):
             raise ValueError(f"The traced packets do not match the model's LOD {lod} packet count")
         info["lod_packet_ranges"][lod] = {"first_packet": packets.start, "packet_count": len(packets)}
+    if args.part_map:
+        info["part_map"] = part_map_coverage(args.part_map.read_bytes(), info["lod_part_counts"])
     print(json.dumps(info, indent=2))
 
 
@@ -350,6 +373,7 @@ def main():
     info.add_argument("model", type=Path)
     info.add_argument("mesh", type=Path)
     info.add_argument("--hi-mesh", type=Path)
+    info.add_argument("--part-map", type=Path, help="check a variant's part.map indices against the model")
     info.set_defaults(run=model_info)
     export = commands.add_parser("mesh-export", help="export packed vertex positions as editable CSV")
     export.add_argument("mesh", type=Path)

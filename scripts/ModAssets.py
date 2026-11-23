@@ -169,15 +169,20 @@ def write_extracted(output, data):
     print(f"{len(data)} bytes  sha256 {hashlib.sha256(data).hexdigest()}")
 
 
+def read_part_map(data):
+    if len(data) < 12:
+        raise ValueError("Truncated part map header")
+    version, lod_count, width = struct.unpack_from("<3I", data)
+    if version != 1 or not lod_count or not width or len(data) != 12 + lod_count * width * 4:
+        raise ValueError("Invalid version 1 part map")
+    return [struct.unpack_from(f"<{width}I", data, 12 + index * width * 4) for index in range(lod_count)]
+
+
 def part_map(args):
     if args.command == "part-map-export":
-        data = args.input.read_bytes()
-        version, lod_count, width = struct.unpack_from("<3I", data)
-        if version != 1 or not lod_count or not width or len(data) != 12 + lod_count * width * 4:
-            raise ValueError("Invalid version 1 part map")
-        lods = [struct.unpack_from(f"<{width}I", data, 12 + index * width * 4) for index in range(lod_count)]
+        lods = read_part_map(args.input.read_bytes())
         with args.output.open("x", encoding="utf-8") as stream:
-            json.dump(dict(version=version, entries_per_lod=width, lods=lods), stream, indent=2)
+            json.dump(dict(version=1, entries_per_lod=len(lods[0]), lods=lods), stream, indent=2)
             stream.write("\n")
     else:
         data = json.loads(args.input.read_text(encoding="utf-8"))
