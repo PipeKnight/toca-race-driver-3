@@ -31,9 +31,11 @@ def append_variant(archive, mesh):
     for name in (b"dtmx_20.big", b"dtmx_20.tex", b"QA_Touring.mdl", b"QA_Touring.msh"):
         if any(key.lower() == name.lower() for key in entries):
             raise ValueError(f"The class package already contains {name.decode('ascii')}")
-    entries[b"dtmx_20.big"] = entries[b"dtmx_13.big"]
+    variant_data = find_member(archive, "dtmx_13.big")[0].read(archive)
+    entries[b"dtmx_20.big"] = (variant_data, len(variant_data), entries[b"dtmx_13.big"][2])
     entries[b"dtmx_20.tex"] = entries[b"dtmx_13.tex"]
-    entries[b"QA_Touring.mdl"] = entries[b"DTM_C_Klasse.mdl"]
+    model = find_member(archive, "DTM_C_Klasse.mdl")[0].read(archive)
+    entries[b"QA_Touring.mdl"] = (model, len(model), entries[b"DTM_C_Klasse.mdl"][2])
     entries[b"QA_Touring.msh"] = (mesh, len(mesh), entries[b"DTM_C_Klasse.msh"][2])
     lookup = find_member(archive, "lookup.ini")[0].read(archive)
     if any(line.lower().lstrip().startswith(b"dtmx_20=") for line in lookup.splitlines()):

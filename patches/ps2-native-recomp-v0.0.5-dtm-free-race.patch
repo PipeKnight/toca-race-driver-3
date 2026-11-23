@@ -1,0 +1,222 @@
+diff --git a/runtime/src/disc.cpp b/runtime/src/disc.cpp
+--- a/runtime/src/disc.cpp
++++ b/runtime/src/disc.cpp
+@@ -16,6 +16,7 @@
+ #include <cstring>
+ #include <map>
+ #include <memory>
++#include <span>
+ #include <set>
+ #include <string_view>
+ 
+@@ -195,7 +196,12 @@
+     DtmVariantFile{"CARDATA\\DTMX\\DTMX.JPK", "DTMX_EXT.JPK", 8 * 1024 * 1024, 0},
+     DtmVariantFile{"CARDATA\\DTMX\\QA_TOURING_HI.MSH", "QA_TOURING_HI.MSH", 369788, 369788},
+     DtmVariantFile{"CARDATA\\DTMX\\DTMX_20_HI.TEX", "DTMX_20_HI.TEX", 381204, 381204},
++    DtmVariantFile{"CARDATA\\DTMX\\DTMX_20.BIG", "dtmx_20.big", 27264, 27264},
++    DtmVariantFile{"CARDATA\\DTMX\\LOOKUP.INI", "lookup.ini", 460, 460},
++    DtmVariantFile{"CARDATA\\DTMX\\QA_TOURING.MDL", "QA_Touring.mdl", 72716, 72716},
++    DtmVariantFile{"CARDATA\\DTMX\\QA_TOURING.MSH", "QA_Touring.msh", 376572, 376572},
+ };
++constexpr std::size_t dtm_variant_menu_start = 3;
+ constexpr std::uint32_t dtm_variant_first_sector = 742000;
+ constexpr std::uint32_t dtm_variant_event_sector = 81008;
+ constexpr std::size_t dtm_variant_event_size = 0x1fe800;
+@@ -235,22 +241,113 @@
+     return true;
+ }
+ 
++// The JPAK directory and its name strings have already been validated.
++std::span<const std::uint8_t> raw_variant_member(const std::vector<std::uint8_t> &data, std::string_view name) {
++    constexpr std::size_t header_size = 32, row_size = 32;
++    const auto end = header_size + u32(data.data() + 8) * row_size;
++    for (std::size_t row = header_size; row < end; row += row_size) {
++        const auto *entry = data.data() + row;
++        if (name != reinterpret_cast<const char *>(data.data() + u32(entry))) continue;
++        const auto stored = u32(entry + 4);
++        if (stored != u32(entry + 12)) return {};
++        return {data.data() + u32(entry + 8), stored};
++    }
++    return {};
++}
++
++bool replace_event_text(std::string &text, std::string_view before, std::string_view after) {
++    const auto at = text.find(before);
++    if (at == std::string::npos || text.find(before, at + before.size()) != std::string::npos)
++        return false;
++    text.replace(at, before.size(), after);
++    return true;
++}
++
++bool append_free_race_driver(std::vector<std::uint8_t> &events) {
++    constexpr std::size_t directory_start = 0x24, row_size = 24;
++    if (events.size() < directory_start || std::memcmp(events.data(), "BIGF", 4)) return false;
++    const auto count = u32(events.data() + 4);
++    const auto base = u32(events.data() + 8);
++    if (base < directory_start || base > events.size() || count > (base - directory_start) / row_size)
++        return false;
++    const auto directory_end = directory_start + count * row_size;
++    const auto original = events;
++    bool found_dtm = false;
++    std::size_t offset = base;
++    for (std::size_t row = directory_start; row < directory_end; row += row_size) {
++        const auto old_size = u32(original.data() + row + 16);
++        const auto old_offset = u32(original.data() + row + 20);
++        if (old_offset > original.size() - base || old_size > original.size() - base - old_offset)
++            return false;
++        const auto *data = original.data() + base + old_offset;
++        std::size_t size = old_size;
++        std::string modified;
++        if (!std::memcmp(original.data() + row, "dtmxf.ini", sizeof("dtmxf.ini"))) {
++            if (found_dtm) return false;
++            found_dtm = true;
++            modified.assign(reinterpret_cast<const char *>(data), size);
++            const auto first = modified.find("[Driver 13]\r\n");
++            const auto last = modified.find("[Driver 14]\r\n");
++            if (first == std::string::npos || last == std::string::npos || last <= first) return false;
++            auto driver = modified.substr(first, last - first);
++            if (!replace_event_text(driver, "[Driver 13]", "[Driver 21]") ||
++                !replace_event_text(driver, "Name = Alexandros Margaritis", "Name = QA Touring") ||
++                !replace_event_text(driver, "CarUID = dtmx_13/CKL", "CarUID = dtmx_20/CKL") ||
++                !replace_event_text(driver, "DriverNumber = 17", "DriverNumber = 99") ||
++                !replace_event_text(modified, "DriversNum = 20\r\n", "DriversNum = 21\r\n") ||
++                !replace_event_text(modified, "[CarPartUpgrades]", driver + "[CarPartUpgrades]"))
++                return false;
++            data = reinterpret_cast<const std::uint8_t *>(modified.data());
++            size = modified.size();
++        }
++        if (offset > events.size() || size > events.size() - offset) return false;
++        const auto write32 = [&](std::size_t at, std::uint32_t value) {
++            for (unsigned i = 0; i < 4; ++i)
++                events[at + i] = static_cast<std::uint8_t>(value >> (i * 8));
++        };
++        write32(row + 16, static_cast<std::uint32_t>(size));
++        write32(row + 20, static_cast<std::uint32_t>(offset - base));
++        std::memcpy(events.data() + offset, data, size);
++        offset += (size + 31) & ~std::size_t{31};
++    }
++    return found_dtm;
++}
++
+ bool prepare_dtm_variant(const Entry &archive, const std::filesystem::path &root) {
+     auto mod = std::make_unique<DtmVariant>();
+-    auto relative = dtm_variant_first_sector;
+-    for (std::size_t i = 0; i < dtm_variant_files.size(); ++i) {
++    for (std::size_t i = 0; i < dtm_variant_menu_start; ++i) {
+         const auto &descriptor = dtm_variant_files[i];
+         if (!load_dtm_variant_file(root / descriptor.name, mod->files[i], descriptor.limit, descriptor.exact)) {
+             std::fprintf(stderr, "[dtm-mod] missing or invalid variant asset %s\n", descriptor.name);
+             return false;
+         }
++    }
++    if (!valid_dtm_package(mod->files[0], 61) || !valid_dtm_hi_mesh(mod->files[1])) {
++        std::fprintf(stderr, "[dtm-mod] invalid variant archive or model\n");
++        return false;
++    }
++    // Older packs store this member compressed and only support the introductory race.
++    const auto &package = mod->files[0];
++    const bool free_race = !raw_variant_member(package, dtm_variant_files[dtm_variant_menu_start].name).empty();
++    if (free_race) {
++        for (std::size_t i = dtm_variant_menu_start; i < dtm_variant_files.size(); ++i) {
++            const auto &descriptor = dtm_variant_files[i];
++            const auto payload = raw_variant_member(package, descriptor.name);
++            if (payload.size() != descriptor.exact) {
++                std::fprintf(stderr, "[dtm-mod] missing or invalid Free Race asset %s\n", descriptor.name);
++                return false;
++            }
++            mod->files[i].assign(payload.begin(), payload.end());
++        }
++    }
++    auto relative = dtm_variant_first_sector;
++    for (std::size_t i = 0; i < mod->files.size(); ++i) {
++        if (mod->files[i].empty()) continue;
+         mod->sectors[i] = relative;
+         relative += static_cast<std::uint32_t>((mod->files[i].size() + kSector - 1) / kSector);
+     }
+     const auto catalog = find("RDH_1.HUG");
+-    if (!catalog || catalog->size != 1546352640u ||
+-        !valid_dtm_package(mod->files[0], 61) || !valid_dtm_hi_mesh(mod->files[1]) ||
+-        relative > archive.size / kSector ||
++    if (!catalog || catalog->size != 1546352640u || relative > archive.size / kSector ||
+         !dtm_variant_has_room(archive.sector + dtm_variant_first_sector, archive.sector + relative)) {
+         std::fprintf(stderr, "[dtm-mod] invalid variant archive, model or reference disc padding\n");
+         return false;
+@@ -284,6 +381,10 @@
+             std::fprintf(stderr, "[dtm-mod] could not add the car to the combined event catalog\n");
+             return false;
+         }
++    }
++    if (free_race && !append_free_race_driver(mod->events)) {
++        std::fprintf(stderr, "[dtm-mod] could not add the car to the DTM Free Race roster\n");
++        return false;
+     }
+     mod->event_archive_sector = catalog->sector;
+     g_dtm_variant = std::move(mod);
+@@ -349,6 +450,7 @@
+         const auto events = std::uint64_t{mod.event_archive_sector + dtm_variant_event_sector} * kSector;
+         copy_overlay_range(start, out, got, events, mod.events);
+         for (std::size_t i = 0; i < mod.files.size(); ++i) {
++            if (mod.files[i].empty()) continue;
+             const auto offset = std::uint64_t{g_dtm_archive_sector + mod.sectors[i]} * kSector;
+             if (copy_overlay_range(start, out, got, offset, mod.files[i]))
+                 std::fprintf(stderr, "[dtm-mod] loading %s\n", dtm_variant_files[i].name);
+@@ -557,14 +659,16 @@
+     return true;
+ }
+ 
+-bool dtm_variant_record(std::uint32_t frame) {
+-    if (!g_dtm_variant || frame > kRamSize - 144u) return false;
+-    const auto path = upper(std::string(guest_name(frame)));
++bool dtm_variant_record(std::uint32_t filename, std::uint32_t record) {
++    if (!g_dtm_variant || record > kRamSize - 16u) return false;
++    const auto path = upper(std::string(guest_name(filename)));
+     for (std::size_t i = 0; i < dtm_variant_files.size(); ++i) {
+-        if (path != dtm_variant_files[i].path) continue;
+-        st8(frame + 130u, 2);
+-        st32(frame + 136u, g_dtm_variant->sectors[i]);
+-        st32(frame + 140u, static_cast<std::uint32_t>(g_dtm_variant->files[i].size()));
++        const auto &bytes = g_dtm_variant->files[i];
++        if (bytes.empty() || path != dtm_variant_files[i].path) continue;
++        std::memset(g_ram + record, 0, 16);
++        st8(record + 2u, 2);
++        st32(record + 8u, g_dtm_variant->sectors[i]);
++        st32(record + 12u, static_cast<std::uint32_t>(bytes.size()));
+         return true;
+     }
+     return false;
+diff --git a/runtime/include/ps2/disc.hpp b/runtime/include/ps2/disc.hpp
+--- a/runtime/include/ps2/disc.hpp
++++ b/runtime/include/ps2/disc.hpp
+@@ -35,7 +35,7 @@
+ void set_dtm_mod_directory(const std::string &folder);
+ bool road_america_enabled();
+ void road_america_path(std::uint32_t address);
+-bool dtm_variant_record(std::uint32_t frame);
++bool dtm_variant_record(std::uint32_t filename, std::uint32_t record);
+ std::uint32_t road_america_member(std::uint32_t address, std::uint32_t scratch);
+ std::optional<Entry> find(const std::string &path);
+ std::uint32_t layer1_start();
+diff --git a/recomp/codegen.cpp b/recomp/codegen.cpp
+--- a/recomp/codegen.cpp
++++ b/recomp/codegen.cpp
+@@ -216,7 +216,7 @@
+         out_.str({});
+         const bool asset_hooks = !relocatable_ && !options_.live_stamp &&
+             ((base_ <= 0x002568E4u && 0x002568E4u < end) ||
+-             (base_ <= 0x002568F4u && 0x002568F4u < end) ||
++             (base_ <= 0x002566E0u && 0x002566E0u < end) ||
+              (base_ <= 0x00389084u && 0x00388F98u < end));
+         out_ << "#include \"units.hpp\"\n";
+         if (asset_hooks) out_ << "#include \"ps2/disc.hpp\"\n";
+@@ -253,8 +253,9 @@
+             if (options_.probes.count(a)) line(std::format("probe(c, {});", pc(a)));
+             const Insn i = at(a);
+             if (asset_hooks) {
+-                if (a == 0x002568F4u && i.word == 0x0040782du)
+-                    line("if (disc::dtm_variant_record(c.r[29].w[0])) set32(c.r[2], 1u);");
++                if (a == 0x002566E0u && i.word == 0x27bdffb0u)
++                    line("if (disc::dtm_variant_record(c.r[4].w[0], c.r[5].w[0])) "
++                         "{ set32(c.r[2], 1u); c.pc = c.r[31].w[0]; return; }");
+                 if (a == 0x002568E4u && i.word == 0x27a50080u)
+                     line("disc::road_america_path(c.r[29].w[0]);");
+                 if (a == 0x00388F98u && i.word == 0x27bdffd0u)

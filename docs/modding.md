@@ -7,7 +7,7 @@ This guide uses the North American PS2 disc `SLUS-21182` v1.02 and the portable 
 | Import a Race Driver 2 circuit | Build the local donor pack from both PS2 discs and install it in Free Race. [Road America import](ps2-disc-and-archives.md#play-road-america-from-your-own-discs) |
 | Build an original circuit | Start with the working Foundry Oval slot, then replace the road mesh, collision, and AI route together. [Foundry Oval example](#build-and-play-foundry-oval) |
 | Put my own geometry on a working car | Export one detail level of the DTM car as OBJ, author the replacement faces, and test an overlay. [DTM model workflow](ps2-dtm-models.md#replace-selected-mesh-packets-from-obj) |
-| Test a new car variant alongside the original cars | Put two edited meshes into the additional DTM variant and drive it in the introductory Oschersleben race. [Additional DTM variant](#test-an-additional-dtm-variant) |
+| Test a new car variant alongside the original cars | Build the additional DTM variant and drive it in the introductory race or select it in DTM Free Race. [Additional DTM variant](#test-an-additional-dtm-variant) |
 
 ## Inspect and extract files
 
@@ -170,7 +170,7 @@ Start with a DTM car. The verified PS2 archive for the class is `CARDATA\DTMX\DT
 
 | File or entry | Role in the PS2 DTM car path |
 | --- | --- |
-| `CarUID` in `events.big` | A car variant and a type ID separated by `/`, for example `dtmx_13/CKL`. The driver roster supplies AI entries. `CareerOfferCarID` supplies the car offered to the player for the introductory DTM event. |
+| `CarUID` in `events.big` | A car variant and a type ID separated by `/`, for example `dtmx_13/CKL`. The driver roster supplies the entrants and the Free Race car choices. `CareerOfferCarID` supplies the car offered to the player for the introductory DTM event. |
 | `Cartype.big` | Vehicle type records. `StringID` gives the ID used after `/` in the event. The Mercedes record uses `CKL`. The records also give display names, a manufacturer ID, and a Hall of Fame index. |
 | `lookup.ini` | Maps a variant to its model basename. DTM variants with different liveries can point to the same geometry. |
 | `.mdl`, `.msh`, `_HI.MSH` | The model sections and VIF vertex streams. The Mercedes uses a separate high-detail mesh plus four detail levels in the class mesh. |
@@ -201,8 +201,9 @@ The DTM model and overlay guide covers the `.mdl`/`.msh` structure, OBJ exports 
 ### Test an additional DTM variant
 
 1. Extract the Mercedes class and high-detail meshes. Edit each with the DTM mesh workflow, using the original as a template for packet capacity, materials, and local coordinates. For a first test, give the high-detail mesh one visible edit and copy the class mesh unchanged.
-2. Build the add-on in a new directory. It adds `dtmx_20/CKL` and a separate mesh named `QA_Touring` inside a copy of the DTM class package. The new entry reuses the `CKL` vehicle type and the Mercedes template's mechanics, livery, and part maps. It leaves the original DTM entries in the package for the opponents.
-3. Open a portable launcher built with the DTM variant backend patch. Start with an empty data directory and take the introductory Oschersleben race. That event assigns the new car to the player. Check the chase, bonnet, and cockpit cameras, then compare the other DTM cars with a stock run. The ordinary DTM Free Race car selection and progression lists retain their stock entries.
+2. Build the add-on in a new directory using the command below. It adds `dtmx_20/CKL` and a separate mesh named `QA_Touring` inside a copy of the DTM class package. This entry reuses the `CKL` vehicle type and the Mercedes template's mechanics, livery, and part maps.
+3. Open a portable launcher built with the DTM Free Race patch. On an empty data directory, take the introductory Oschersleben race for immediate access to the modded car. Check the chase, bonnet, and cockpit views.
+4. With DTM unlocked on the mod's memory card, open **Simulation Modes → Free Race → Touring Car → DTM** and choose a track. Choose the **AMG Mercedes C Klasse DTM** with the **QA Touring** driver. It follows the 20 stock drivers in the car selector.
 
 ```powershell
 $mod = "$work\dtm-variant"
@@ -210,4 +211,6 @@ python scripts/BuildDtmVariant.py --disc $disc --mesh "$work\mercedes-class-edit
 .\TocaRecomp.exe --disc 'D:\Games\TOCA Race Driver 3.iso' --dtm-mod $mod --data-dir "$work\variant-player"
 ```
 
-For this race, the game reads the whole field's model lookup from one class package. A package with just the new variant can load the player's model and then stall while resolving the first opponent. The expanded package carries both the existing DTM models and the new pair. The Windows runtime redirects the new files to verified empty sectors within `RDH_2.HUG` at read time. The disc stays read-only. The add-on files contain game assets copied locally from the supplied disc. Share the builder and your original source geometry.
+Build a fresh add-on directory if your earlier pack only assigned **QA Touring** to the introductory race. The launcher uses a dedicated memory card for `--dtm-mod`, and DTM follows the usual unlock requirements on that card.
+
+During a race, the game reads the whole field's model lookup from one class package. In the selector, the game requests the lookup and model files individually. The expanded package supplies both paths. The Windows runtime redirects those reads to verified empty sectors within `RDH_2.HUG`. The disc stays read-only. The add-on files contain game assets copied locally from the supplied disc. Share the builder and your original source geometry.
