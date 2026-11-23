@@ -1,6 +1,6 @@
 # Import from Race Driver 2 on PS2
 
-Use your own PS2 copies of Race Driver 2 `SLES-52638` v1.02 and TOCA Race Driver 3 `SLUS-21182` v1.02. This guide covers Road America and both A1-Ring layouts through a verified circuit importer. The car example fits a DB5 roof strip and copies the donor's body texture pages onto the QA Touring test variant. A complete DB5 conversion remains in development.
+Use your own PS2 copies of Race Driver 2 `SLES-52638` v1.02 and TOCA Race Driver 3 `SLUS-21182` v1.02. This guide covers Road America and both A1-Ring layouts through a verified circuit importer. The playable car example fits a DB5 roof strip and copies the donor's body texture pages onto the QA Touring test variant. The model converter also prepares all five DB5 detail levels for development builds.
 
 ## Convert Road America and A1-Ring
 
@@ -72,4 +72,52 @@ The `preview.7` Direct3D 12 runner showed the sample in the Free Race selector u
 
 Export the RD3 Mercedes template and choose a visible body surface. Match a strip by inspecting its `packet_N` group in the RD2 OBJ. `mesh-copy-strip` works when the source strip fits the target packet's vertex capacity. For changes that need to split or retriangulate a strip, align the donor OBJ to the target in local coordinates, keep a UV on every corner, and export the edited faces in the target Mercedes `packet_N` groups. Use `mesh-replace` and test the high-detail and class meshes separately. [Mesh replacement commands](ps2-dtm-models.md#replace-selected-mesh-packets-from-obj) · [Build the RD3 variant](modding.md#test-an-additional-dtm-variant)
 
-A complete conversion additionally needs the donor material and texture mapping, every detail level, the RD3 part map, wheel and suspension attachments, damage, and vehicle mechanics. The sample RD2 model's part table differs from the layout checked by the RD3 tool. A complete port needs in-game checks for the selector, other cars on the grid, cameras, LOD transitions, a classified finish, and damage.
+## Convert the full DB5 model pair
+
+Run this after extracting the DB5 above. The RD3 template provides the three reference addresses used by the destination model. The donor provides the model hierarchy, vertex streams, UVs, normals, and texture data. The output directory must be new.
+
+```powershell
+$template = Join-Path $work 'RD3 model template'
+$converted = Join-Path $work 'DB5 converted model'
+New-Item -ItemType Directory -Path $template | Out-Null
+python scripts/ModAssets.py extract --disc $rd3 --package dtm-cars DTM_C_Klasse.mdl "$template\car.mdl"
+python scripts/ModAssets.py extract --disc $rd3 --package dtm-cars dtmx_13.tex "$template\car.tex"
+python scripts/ModAssets.py extract-resource --disc $rd3 --range 2 185648 381204 "$template\car_hi.tex"
+python scripts/ConvertRd2CarModel.py --model "$car\db5.mdl" --mesh "$car\db5.msh" `
+    --class-textures "$car\vc_2.tex" --high-textures "$car\vc_2_hi.tex" `
+    --target-model "$template\car.mdl" --target-class-textures "$template\car.tex" `
+    --target-high-textures "$template\car_hi.tex" --output $converted
+python scripts/Ps2CarModel.py model-info "$converted\car.mdl" "$converted\car.msh" `
+    --hi-mesh "$converted\car_hi.msh" `
+    --part-map "$converted\part.map"
+```
+
+The conversion splits the RD2 mesh into LOD 0 and LODs 1–4, recalculates the DMA lengths and relocation offsets, and removes the separate RD2 color uploads where RD3's mesh walker expects positions. It compacts both the part and binding tables. The part map preserves the logical slot numbers and points each active slot to its new compact index. RD2 texture descriptors store an image byte count in the field RD3 uses for the mip upload count. The converter emits one upload per descriptor for the DB5 containers.
+
+| LOD | Drawable parts | Mesh packets |
+| --- | ---: | ---: |
+| 0 | 71 | 574 |
+| 1 | 56 | 376 |
+| 2 | 52 | 189 |
+| 3 | 45 | 117 |
+| 4 | 4 | 25 |
+
+The converter also rebuilt all five LODs of the RD2 Ford Falcon against the RD3 Falcon pair. This checks the model layout on a second donor. Slot numbers for a few matching Falcon parts were confirmed against both games. The mapping still needs in-race validation for moving DB5 parts and damage.
+
+### In-game status
+
+These outputs are development inputs. A Windows Direct3D 12 diagnostic runner displayed the converted exterior and donor livery in the selector. In the Oschersleben race, the car cast a shadow and responded to controls, while the body failed to render. The trace found a race-generated DMA reference starting inside a VIF vertex stream. Both the DB5 and Mercedes texture controls showed the same rendering symptom with the converted model.
+
+### Find the donor mechanics
+
+The `vc_2` mechanics package is at `RD2_1.HUG` sector 790877 and occupies six sectors. Its `num.ini` identifies the variant. Both mechanics CSVs identify the Aston Martin DB5 and the damage file identifies `db5`. Extract these to inspect independent copies of the standard and simulation settings.
+
+```powershell
+$mechanics = Join-Path $work 'DB5 mechanics'
+New-Item -ItemType Directory -Path $mechanics | Out-Null
+foreach ($member in 'Mech.csv', 'SimMech.csv', 'dmg.ini', 'int.ini', 'num.ini') {
+    python scripts/ModAssets.py extract --rd2-disc $rd2 --range 1 790877 12288 $member "$mechanics\$member"
+}
+```
+
+Each RD2 mechanics row has 130 columns. The RD3 QA Touring rows each have 200 columns. Copying the overlapping driving fields into the RD3 rows changed the car's speed at the same frame of a scripted Oschersleben run. The remaining RD3 fields, sound, cockpit, wheel motion, suspension, and damage behaviour still need their own checks. Acceptance requires a visible car in a race, functioning attachments through LOD transitions, and a classified finish.
