@@ -106,7 +106,7 @@ Keep the DB5 as the reference car for the RD2 importer. Complete this checklist 
 - [x] Import both wiper pivots and shapes. Verify their parked positions in Sunny and their sweep in a diagnostic Rain race.
 - [x] Fit the donor door trim and a steering wheel sized from the original part. Verify the steering wheel moves in both directions with controller input.
 - [x] Verify live speed and rev needles in the single-player cockpit. Match the generated needle angles to the active guest speed and rev values and compare with a frozen-instrument control.
-- [ ] Validate real track reflections on the relocated mirrors and switch into and out of the cockpit repeatedly with reflections enabled.
+- [ ] Validate real track reflections on the relocated mirrors. A DTM Free Race diagnostic repeatedly switched into and out of the DB5 cockpit with the live rear-view overlay enabled. The physical rear glass stayed dark on both cockpit visits.
 - [x] Verify that the DB5 keeps identical axle mount offsets in LODs 0–3. In Windows traffic, identify all four tire draw uploads as an AI-driven DB5 leaves LOD 1, moves to LOD 2, and moves to LOD 3. LOD 4 uses the combined far model.
 - [ ] Observe wheel rotation, steering, and suspension travel across LODs 0–4 on the player and AI cars. Check for jumps in wheel position or missing parts at each transition. Repeat after damage and compare with a stock control car.
 - [ ] Compare the player and AI engine mix, loop transitions, and gear-change samples with the original RD2 car. Confirm stock RD3 cars keep their normal audio on the same build.
