@@ -45,7 +45,7 @@ This first tool authors **one** extra circuit per pack in `tqa5`; it does not dy
 
 ## Test the track in game
 
-The Windows 11 Direct3D 12 test loaded slot `tqa5` in both modes. Time Trial completed a **1:29.77** Racing Clio lap and displayed its ghost on the next lap. Ending the session saved the `tqa5` lap record. A cold launch with the current track loaded and played that ghost through sample 54 of 449, with the memory card unchanged.
+The Windows 11 Direct3D 12 test loaded slot `tqa5` in both modes. On the installed combined pack with the revised pit route, Time Trial saved a new **1:29.77** Racing Clio lap and ghost on a card with no prior `tqa5` entry. The previous Dirt Raceway 1 ghost remained on the card. A cold launch played the new Tsukuba ghost through sample 95 of 449 without changing the card.
 
 Free Race initially sent opponents down the pit route because its entry gate still crossed the racing surface. Moving the pit gates to the separated lane and adding a main-route approach marker fixed the false pit entries in the subsequent test. With the normal race rules enabled, a 20-car one-lap race reached Race Results. Player One finished in **1:32.06** without a time penalty; the leading opponent finished in **1:10.97**. A cold replay on the normal runner matched all **901 checkpoints** and wrote the race autosave. Pit-stop operation and weather other than Sunny are outside this test.
 
