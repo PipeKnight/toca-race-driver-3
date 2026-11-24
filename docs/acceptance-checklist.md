@@ -99,7 +99,7 @@ Custom tracks and cars have their own acceptance criteria. The recompilation can
 
 Keep the DB5 as the reference car for the RD2 importer. Complete this checklist before treating its preset as finished or moving on to the Peugeot 205.
 
-- [ ] Verify exterior door paint in moving traffic. Matched selector captures show the repaint on both sides. The builder now transfers outward paint normals as well as texture coordinates at LODs 0–3. The door vertices and hinges are unchanged.
+- [ ] Verify both sides of the exterior door paint in moving traffic. Matched selector captures show the repaint on both sides, and a trackside replay shows the camera-facing door in a moving DTM field. The builder transfers outward paint normals as well as texture coordinates at LODs 0–3. The door vertices and hinges are unchanged.
 - [x] Use a DB5-specific shadow caster sized from its body, roof, and wheels. Verify the change against the Mercedes shadow in a matched Windows race capture.
 - [x] Import both wiper pivots and shapes. Verify their parked positions in Sunny and their sweep in a diagnostic Rain race.
 - [x] Fit the donor door trim and a steering wheel sized from the original part. Verify the steering wheel moves in both directions with controller input.
