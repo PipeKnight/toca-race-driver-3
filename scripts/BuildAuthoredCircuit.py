@@ -14,6 +14,8 @@ from BuildFoundryOval import build_packages, write_obj
 from BuildRoadAmericaMod import TrackEntry, event_catalog, track_catalog
 from Ps2TrackRoute import EVENT, MAGIC, POINT, SECTION, read_route
 
+PIT_HALF_WIDTH = 3.4
+
 
 def unit(x, z):
     length = math.hypot(x, z)
@@ -139,8 +141,8 @@ class Circuit:
         right = [self.offset(d, half) for d in self.stations]
         validate_ribbon(left, right, "The racing surface", closed=True)
         pit_stations = range(-85, 86, 5)
-        left = [self.offset(d, pit_offset(d, self.width) - 3.4) for d in pit_stations]
-        right = [self.offset(d, pit_offset(d, self.width) + 3.4) for d in pit_stations]
+        left = [self.offset(d, pit_offset(d, self.width) - PIT_HALF_WIDTH) for d in pit_stations]
+        right = [self.offset(d, pit_offset(d, self.width) + PIT_HALF_WIDTH) for d in pit_stations]
         validate_ribbon(left, right, "The pit lane", closed=False)
 
 
@@ -154,28 +156,35 @@ def build_route(circuit):
     first, second = (round(frac * count) for frac in circuit.sectors)
     boundary = round(80 * count / circuit.length)
     pit_approach = count - round(96 * count / circuit.length)
+    pit_switch = count - round(88 * count / circuit.length)
     if first < boundary + 2 or second > count - boundary - 2:
         raise ValueError("Keep the timing splits outside the 80 m start/finish area")
     markers = {
         0: (6, 255, 0), boundary: (13, 255, 0),
         (boundary + first) // 2: (10, 0, 0), first: (2, 255, 0),
         (first + second) // 2: (10, 1, 0), second: (2, 255, 1),
-        (second + count - boundary) // 2: (10, 2, 0), pit_approach: (1, 255, 0), count - boundary: (12, 255, 0),
+        (second + count - boundary) // 2: (10, 2, 0), pit_approach: (1, 255, 0),
+        pit_switch: (3, 255, 1), count - boundary: (12, 255, 0),
     }
-    if len(markers) != 9:
+    if len(markers) != 10:
         raise ValueError("Keep enough space between sector splits and the pit approach")
     main = [(d, 0., *markers.get(i, (0, 255, 0))) for i, d in enumerate(stations)]
     pit = []
     for i, d in enumerate(range(-90, 91, 5)):
         # Place the pit-only gates on the offset lane, not on the racing surface at the merge.
         slots = 9 <= i <= 27 and i % 2 == 1
-        code = {6: 5, 8: 14, 18: 6, 28: 15, 30: 11}.get(i, 3 if slots else 0)
-        pit.append((d, pit_offset(d, circuit.width), code, (i - 9) // 2 if code == 3 else 255, int(code == 3)))
+        code = {6: 5, 8: 14, 18: 6, 28: 15, 30: 11, 36: 3}.get(i, 3 if slots else 0)
+        stall = (i - 9) // 2 if slots else 255
+        pit.append((d, pit_offset(d, circuit.width), code, stall, int(slots)))
+        if slots:
+            # Pair each stall start with its end marker before the next 5 m station.
+            pit.append((d + 4, pit_offset(d + 4, circuit.width), 4, stall, 0))
     auxiliary = [(d, 0., 0, 1, 0) for d in stations[-boundary:] + stations[:boundary + 1]]
     half = circuit.width / 2
     # The main route's outer lanes frame the drivable ribbon instead of collapsing onto its center.
+    # The pit entry tests lanes 0 and 1 as the two edges of the corridor; lane 2 is its center.
     groups = ((main, (-half, -half * 0.46, half * 0.32, 0, half), 0x1f, 1),
-              (pit, (0, 1.6, 2.8, 2.8), 0x27, 0), (auxiliary, (0, 4.0), 3, 0))
+              (pit, (-PIT_HALF_WIDTH, PIT_HALF_WIDTH, 0, 2.8), 0x27, 0), (auxiliary, (0, 4.0), 3, 0))
     headers, events, points = bytearray(), bytearray(), bytearray()
     for rows, offsets, mask, loop in groups:
         headers.extend(SECTION.pack(len(rows), mask, loop))
@@ -207,7 +216,7 @@ def build_geometry(circuit, work):
     road, road_faces = [], []
     ribbon(road, road_faces, circuit.stations, lambda d: (-half, half), closed=True)
     ribbon(road, road_faces, list(range(-85, 86, 5)),
-           lambda d: (pit_offset(d, circuit.width) - 3.4, pit_offset(d, circuit.width) + 3.4))
+           lambda d: (pit_offset(d, circuit.width) - PIT_HALF_WIDTH, pit_offset(d, circuit.width) + PIT_HALF_WIDTH))
     write_obj(work / "road.obj", road, road_faces)
 
     marks, mark_faces = [], []

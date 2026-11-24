@@ -6,7 +6,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from BuildAuthoredCircuit import Circuit, build_route, edges_touch, preview, validate_ribbon
+from BuildAuthoredCircuit import PIT_HALF_WIDTH, Circuit, build_route, edges_touch, pit_offset, preview, validate_ribbon
 from BuildRoadAmericaMod import TrackEntry, read_bigf, repack_bigf, track_catalog
 from ImportRd2Car import variants
 from Ps2TrackCollision import read_triangles
@@ -25,16 +25,27 @@ class AuthoredCircuitTests(unittest.TestCase):
         self.assertEqual([event[5] for event in main.events if event[3] == 2], [0, 1])
         self.assertEqual([event[4] for event in main.events if event[3] == 10], [0, 1, 2])
         self.assertAlmostEqual(math.dist(main.lanes[0][0], main.lanes[4][0]), circuit.width, places=3)
-        self.assertEqual([event[3] for event in pit.events if event[3] not in (0, 3)], [5, 14, 6, 15, 11])
+        self.assertEqual([event[3] for event in pit.events if event[3] not in (0, 3, 4)], [5, 14, 6, 15, 11])
         self.assertEqual(sum(event[3] == 1 for event in main.events), 1)
+        self.assertEqual([event[3:6] for event in main.events if event[3] == 3], [(3, 255, 1)])
+        self.assertEqual(pit.events[-1][3:6], (3, 255, 0))
+        self.assertEqual(len(pit.events), 47)
+        stalls = [(i, event[4]) for i, event in enumerate(pit.events) if event[3:6:2] == (3, 1)]
+        self.assertEqual([tag for _, tag in stalls], list(range(10)))
+        for i, tag in stalls:
+            self.assertEqual(pit.events[i + 1][3:6], (4, tag, 0))
+            self.assertAlmostEqual((pit.events[i + 1][2] - pit.events[i][2]) % circuit.length, 4.)
         for gate in (5, 11, 14, 15):
             i, = (i for i, event in enumerate(pit.events) if event[3] == gate)
-            center = circuit.position(pit.events[i][2])
-            self.assertGreater(math.dist(center, pit.lanes[0][i]), circuit.width / 2 + 5)
+            d = pit.events[i][2]
+            d = d - circuit.length if d > circuit.length / 2 else d
+            center = circuit.offset(d, pit_offset(d, circuit.width))
+            self.assertLess(math.dist(center, pit.lanes[2][i]), .0001)
+            self.assertAlmostEqual(math.dist(pit.lanes[0][i], pit.lanes[1][i]), 2 * PIT_HALF_WIDTH, places=3)
+            self.assertGreater(math.dist(circuit.position(d), pit.lanes[0][i]), circuit.width / 2)
         self.assertGreater(pit.events[0][2], pit.events[-1][2])
         self.assertGreater(auxiliary.events[0][2], auxiliary.events[-1][2])
         self.assertEqual(len(auxiliary.events), 21)
-        self.assertNotEqual(main.lanes[0][0], pit.lanes[0][18])
 
     def test_preview_exports_upward_geometry_and_the_same_route(self):
         circuit = Circuit(self.layout())
