@@ -102,23 +102,43 @@ def driving_csv(donor, target, name, radii, donor_sound=False):
     return output.getvalue().encode("ascii")
 
 
+def append_sound_members(reference, count, additions):
+    existing, base = read_bigf(reference, count)
+    names = {name.lower() for name in existing}
+    for name in additions:
+        if not 0 < len(name) <= 16 or not name.isascii() or b"\0" in name:
+            raise ValueError("Invalid name for a car sound archive member")
+        if name.lower() in names:
+            raise ValueError(f"The sound archive already contains {name.decode('ascii')}")
+        names.add(name.lower())
+    total = count + len(additions)
+    needed = max(0, 0x24 + total * BIGF_ENTRY.size - base)
+    # Keep stock sector splits: a compact repack changes the car audio read batches.
+    new_base = base + (needed + SECTOR_SIZE - 1) // SECTOR_SIZE * SECTOR_SIZE
+    cars = bytearray(reference[:base].ljust(new_base, b"\0"))
+    cars.extend(reference[base:])
+    struct.pack_into("<2I", cars, 4, total, new_base)
+    for i, (name, payload) in enumerate(additions.items(), count):
+        cars.extend(bytes(-len(cars) % 64))
+        BIGF_ENTRY.pack_into(cars, 0x24 + i * BIGF_ENTRY.size, name, len(payload), len(cars) - new_base)
+        cars.extend(payload)
+    return bytes(cars)
+
+
 def sound_assets(rd2, rd3):
     with (rd2 / "RD2_1.HUG").open("rb") as stream:
         donor = read_exact(stream, 1000174 * SECTOR_SIZE, 11115173)
     reference = read_disc_range(rd3, 2, 369392, 1345212)
     sounds, _ = read_bigf(reference, 211)
-    for original, name in (
+    additions = {
+        name: member(donor, original) for original, name in (
             ("AstonDB5.ini", b"DB5.ini"), ("AstonDB5ai.ini", b"DB5ai.ini"),
-            ("AstonDB5.msc", b"AstonDB5.msc"), ("AstonDB5ai.msc", b"AstonDB5ai.msc")):
-        if any(key.lower() == name.lower() for key in sounds):
-            raise ValueError(f"The reference sound archive already contains {name.decode('ascii')}")
-        sounds[name] = member(donor, original)
+            ("AstonDB5.msc", b"AstonDB5.msc"), ("AstonDB5ai.msc", b"AstonDB5ai.msc"))
+    }
     if sounds[b"grup_db5.msc"] != member(donor, "grup_db5.msc"):
         raise ValueError("The shared DB5 gear shift bank does not match")
 
-    base = (0x24 + BIGF_ENTRY.size * len(sounds) + SECTOR_SIZE - 1) & -SECTOR_SIZE
-    size = base + sum((len(payload) + 31) & ~31 for payload in sounds.values())
-    cars = repack_bigf(reference[:0x24].ljust(size, b"\0"), sounds, base, base, size)
+    cars = append_sound_members(reference, 211, additions)
     system = read_disc_range(rd3, 2, 371022, 735)
     if not system.startswith(b"[Loops]\r\n") or b"\r\nMERCDTM=37\r\n" not in system or b"DB5=" in system:
         raise ValueError("The reference sound index does not have the expected loop mappings")
