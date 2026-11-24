@@ -10,6 +10,8 @@ python scripts/ImportRd2Car.py build db5 --rd2-disc F:\ --disc G:\ --output loca
 
 `list` shows the playable presets; currently only `db5` is registered. `build` produces a `--dtm-mod` pack and enables the experimental donor sound and cockpit by default. Use `--stock-sound` or `--stock-cockpit` to keep the matching RD3 template component. Launch a current source-built launcher with `--dtm-mod local\db5-pack` and select the Aston Martin DB5 as described in the [DB5 test instructions](race-driver-2-import.md#build-the-experimental-pack-from-both-discs).
 
+Use `build db5 --donor-effects` to also import the RD2 ignition, engine damage, and detonation banks. This is an opt-in audio experiment, not part of the normal preset. It cannot be combined with `--stock-sound`.
+
 `catalog` reads the donor class's `lookup.ini` and lists livery IDs and their model IDs. For a known class range not yet named in the tool, substitute `--class-range HUG SECTOR BYTES` for `--class vintage`. `HUG` is the numbered `RD2_*.HUG`; the sector size is 2,048 bytes. Use the extent of the class archive, not the separate mechanics or sound archive.
 
 ```powershell

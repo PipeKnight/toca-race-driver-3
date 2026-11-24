@@ -23,6 +23,13 @@ from Ps2CarModel import model_sections
 from Ps2CarShadow import build_db5_shadow
 
 
+DB5_PLAYER_EFFECTS = (
+    (b"IGNITI", b"ign_old", b"db5_ign"),
+    (b"DAMAGE", b"edam", b"db5d"),
+    (b"DETONA", b"det_small", b"db5_deton"),
+)
+
+
 def member(archive, name):
     return find_member(archive, name)[0].read(archive)
 
@@ -125,7 +132,20 @@ def append_sound_members(reference, count, additions):
     return bytes(cars)
 
 
-def sound_assets(rd2, rd3):
+def donor_player_effects(player, donor):
+    effects = {}
+    for field, original, alias in DB5_PLAYER_EFFECTS:
+        prefix = b"<" + field + b">"
+        choice = prefix + original + b"\r\n"
+        if player.count(choice) != 1:
+            raise ValueError(f"Expected one DB5 {field.decode('ascii')} sound bank setting")
+        # Keep the stock RD3 effect names untouched for every other car.
+        player = player.replace(choice, prefix + alias + b"\r\n")
+        effects[alias + b".msc"] = member(donor, (original + b".msc").decode("ascii"))
+    return player, effects
+
+
+def sound_assets(rd2, rd3, *, donor_effects=False):
     with (rd2 / "RD2_1.HUG").open("rb") as stream:
         donor = read_exact(stream, 1000174 * SECTOR_SIZE, 11115173)
     reference = read_disc_range(rd3, 2, 369392, 1345212)
@@ -138,6 +158,9 @@ def sound_assets(rd2, rd3):
     if sounds[b"grup_db5.msc"] != member(donor, "grup_db5.msc"):
         raise ValueError("The shared DB5 gear shift bank does not match")
 
+    if donor_effects:
+        additions[b"DB5.ini"], effects = donor_player_effects(additions[b"DB5.ini"], donor)
+        additions.update(effects)
     cars = append_sound_members(reference, 211, additions)
     system = read_disc_range(rd3, 2, 371022, 735)
     if not system.startswith(b"[Loops]\r\n") or b"\r\nMERCDTM=37\r\n" not in system or b"DB5=" in system:
@@ -167,7 +190,9 @@ def car_type_catalog(disc, mechanics):
     return repack_bigf(original, car_types, base, base, len(original))
 
 
-def build(rd2, rd3, donor_sound=False, donor_cockpit=False):
+def build(rd2, rd3, donor_sound=False, donor_cockpit=False, *, donor_effects=False):
+    if donor_effects and not donor_sound:
+        raise ValueError("DB5 donor effects require donor sound")
     verify_directory(rd2 / "RD2.DIR", DONOR_DIRECTORY_HASH)
     verify_directory(rd3 / "RDH.DIR", REFERENCE_DIRECTORY_HASH)
     with (rd2 / "RD2_1.HUG").open("rb") as stream:
@@ -254,7 +279,7 @@ def build(rd2, rd3, donor_sound=False, donor_cockpit=False):
         "db5.shd": build_db5_shadow(donor_model),
     }
     if donor_sound:
-        result.update(sound_assets(rd2, rd3))
+        result.update(sound_assets(rd2, rd3, donor_effects=donor_effects))
     if donor_cockpit:
         result["db5-dials.ini"] = b"DB5DIALS 1\r\n"
     return result
@@ -266,10 +291,11 @@ def main():
     parser.add_argument("--disc", type=Path, required=True, help="extracted or mounted RD3 PS2 disc")
     parser.add_argument("--output", type=Path, required=True, help="new add-on directory")
     parser.add_argument("--donor-sound", action="store_true", help="add the experimental DB5 legacy samples")
+    parser.add_argument("--donor-effects", action="store_true", help="also import the RD2 player effect banks (requires --donor-sound)")
     parser.add_argument("--donor-cockpit", action="store_true", help="add the experimental DB5 cockpit shell and atlas")
     args = parser.parse_args()
     try:
-        result = build(args.rd2_disc, args.disc, args.donor_sound, args.donor_cockpit)
+        result = build(args.rd2_disc, args.disc, args.donor_sound, args.donor_cockpit, donor_effects=args.donor_effects)
         args.output.mkdir()
         for name, data in result.items():
             (args.output / name).write_bytes(data)

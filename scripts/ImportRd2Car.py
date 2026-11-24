@@ -70,7 +70,9 @@ def main():
         command.add_argument("--output", type=Path, required=True, help="new output directory")
     convert.add_argument("variant", type=str.lower)
     build.add_argument("car", type=str.lower, choices=PLAYABLE)
-    build.add_argument("--stock-sound", action="store_true", help="retain the RD3 template engine audio")
+    sound = build.add_mutually_exclusive_group()
+    sound.add_argument("--stock-sound", action="store_true", help="retain the RD3 template engine audio")
+    sound.add_argument("--donor-effects", action="store_true", help="also import the experimental RD2 DB5 player effects")
     build.add_argument("--stock-cockpit", action="store_true", help="retain the RD3 template cockpit")
     args = parser.parse_args()
     try:
@@ -91,7 +93,7 @@ def main():
         else:
             _, builder = PLAYABLE[args.car]
             result = builder(args.rd2_disc, args.disc, donor_sound=not args.stock_sound,
-                             donor_cockpit=not args.stock_cockpit)
+                             donor_cockpit=not args.stock_cockpit, donor_effects=args.donor_effects)
         args.output.mkdir()
         for name, data in result.items():
             (args.output / name).write_bytes(data)

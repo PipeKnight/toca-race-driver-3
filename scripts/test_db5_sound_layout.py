@@ -2,8 +2,9 @@
 
 import struct
 import unittest
+from unittest.mock import patch
 
-from BuildRd2Db5Variant import BIGF_ENTRY, SECTOR_SIZE, append_sound_members
+from BuildRd2Db5Variant import BIGF_ENTRY, SECTOR_SIZE, append_sound_members, build, donor_player_effects
 from BuildRoadAmericaMod import read_bigf
 
 
@@ -35,3 +36,19 @@ class SoundLayoutTests(unittest.TestCase):
         self.assertEqual(read_bigf(new, 3)[1], 256)
         with self.assertRaisesRegex(ValueError, "already contains stock.INI"):
             append_sound_members(old, 2, {b"stock.INI": b"replacement"})
+
+    def test_aliases_player_effects_without_changing_loops_or_gear_shift(self):
+        player = b"<IGNITI>ign_old\r\n<DAMAGE>edam\r\n<DETONA>det_small\r\n<GEARUP>grup_db5\r\n<ELOOPS>astondb5\r\n"
+        banks = {"ign_old.msc": b"ignition", "edam.msc": b"damage", "det_small.msc": b"detonation"}
+        with patch("BuildRd2Db5Variant.member", side_effect=lambda _, name: banks[name]):
+            config, effects = donor_player_effects(player, b"")
+            self.assertEqual(config, b"<IGNITI>db5_ign\r\n<DAMAGE>db5d\r\n<DETONA>db5_deton\r\n"
+                                     b"<GEARUP>grup_db5\r\n<ELOOPS>astondb5\r\n")
+            self.assertEqual(effects, {b"db5_ign.msc": b"ignition", b"db5d.msc": b"damage",
+                                       b"db5_deton.msc": b"detonation"})
+            with self.assertRaisesRegex(ValueError, "Expected one DB5 IGNITI"):
+                donor_player_effects(player + b"<IGNITI>ign_old\r\n", b"")
+
+    def test_donor_effects_require_legacy_sound(self):
+        with self.assertRaisesRegex(ValueError, "require donor sound"):
+            build(None, None, donor_effects=True)
