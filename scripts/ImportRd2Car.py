@@ -103,9 +103,10 @@ def convert_car(archive, variant, disc):
         native_vu_banks=car != "fal_ba")
     if car in WINDSHIELD_STRIPS:
         strips = WINDSHIELD_STRIPS[car]
-        high = convert_windshield(model, high, part_map, {0: strips[0]}, share_windshield_tint=car == "evo7")
+        bad_tint = dict(enumerate((3, 2, 2, 4, 4))) if car == "evo7" else None
+        high = convert_windshield(model, high, part_map, {0: strips[0]}, bad_tint_strips_by_lod=bad_tint)
         low = convert_windshield(model, low, part_map, dict(enumerate(strips[1:], start=1)),
-                                 share_windshield_tint=car == "evo7")
+                                 bad_tint_strips_by_lod=bad_tint)
     texture = convert_textures(member(archive, f"{variant}.tex"), member(template, "dtmx_13.tex"))
     high_texture = convert_textures(member(archive, f"{variant}_hi.tex"), read_disc_range(disc, 2, 185648, 381204))
     return {"car.mdl": model, "car_hi.msh": high, "car.msh": low, "part.map": part_map,

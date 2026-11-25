@@ -7,7 +7,7 @@ from ModAssets import read_part_map
 from Ps2CarModel import STREAM_HEADER, model_sections, relocation_table
 
 
-def convert_windshield(model, mesh, part_map, strips_by_lod, *, share_windshield_tint=False):
+def convert_windshield(model, mesh, part_map, strips_by_lod, *, bad_tint_strips_by_lod=None):
     _, base, _, sections = model_sections(model)
     maps = read_part_map(part_map)
     extent, mesh_base, _ = relocation_table(mesh)
@@ -22,6 +22,8 @@ def convert_windshield(model, mesh, part_map, strips_by_lod, *, share_windshield
         descriptor = read_word(model, part + 8) - base
         tag = (read_word(model, descriptor + 0x14) & 0x7fffffff) - base
         strips = 0
+        skipped_tint = 0
+        skip_tint = False
         while read_word(model, tag) >> 28 & 7 == 3:
             control, pointer = struct.unpack_from("<2I", model, tag)
             tag += 16
@@ -42,7 +44,7 @@ def convert_windshield(model, mesh, part_map, strips_by_lod, *, share_windshield
                             value, registers = struct.unpack_from("<QQ", mesh, offset)
                             if registers == 0x512:
                                 draw_tags.append((offset, value))
-                            elif share_windshield_tint and registers == 6:
+                            elif bad_tint_strips_by_lod is not None and registers == 6:
                                 tex0.append((offset, value))
                 if (len(draw_tags) != 2 or draw_tags[0][1] & 0x8000
                         or not draw_tags[1][1] & 0x8000):
@@ -51,12 +53,20 @@ def convert_windshield(model, mesh, part_map, strips_by_lod, *, share_windshield
                 # The clipper still consumes the full reflection packet. XYZ3 preserves
                 # its vertex updates without drawing the additive reflection triangles.
                 struct.pack_into("<Q", output, offset + 8, 0xd12)
-                if tuple(value for _, value in tex0) == (
-                        0x20068305e1313100, 0x20068185e1313300, 0x20068305e1313100):
-                    # The Lancer's alternate binding at 0x3300 samples livery pixels in RD3.
-                    # Use the matching tinted page and palette from the other two bindings.
-                    struct.pack_into("<Q", output, tex0[1][0], tex0[0][1])
+                if tex0:
+                    skip_tint = tuple(value for _, value in tex0) == (
+                        0x20068305e1313100, 0x20068185e1313300, 0x20068305e1313100)
+                    if skip_tint:
+                        # Keep the texture state consistent for this group of strips.
+                        struct.pack_into("<Q", output, tex0[1][0], tex0[0][1])
+                if skip_tint:
+                    # This extra Lancer glass pass samples unrelated VRAM in RD3.
+                    # The windshield's base material is in a separate group of strips.
+                    struct.pack_into("<Q", output, draw_tags[0][0] + 8, 0xd12)
+                    skipped_tint += 1
                 strips += 1
         if strips != expected_strips:
             raise ValueError(f"Unexpected RD2 windshield strip count in LOD {lod}")
+        if bad_tint_strips_by_lod is not None and skipped_tint != bad_tint_strips_by_lod[lod]:
+            raise ValueError(f"Unexpected extra glass strip count in LOD {lod}")
     return bytes(output)
