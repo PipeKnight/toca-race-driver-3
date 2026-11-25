@@ -7,7 +7,7 @@ from ModAssets import read_part_map
 from Ps2CarModel import STREAM_HEADER, model_sections, relocation_table
 
 
-def convert_windshield(model, mesh, part_map, strips_by_lod):
+def convert_windshield(model, mesh, part_map, strips_by_lod, *, share_windshield_tint=False):
     _, base, _, sections = model_sections(model)
     maps = read_part_map(part_map)
     extent, mesh_base, _ = relocation_table(mesh)
@@ -33,6 +33,7 @@ def convert_windshield(model, mesh, part_map, strips_by_lod):
                 if read_word(mesh, start) != STREAM_HEADER:
                     continue
                 draw_tags = []
+                tex0 = []
                 for command in vif_commands(mesh, start, end):
                     if command.operation in (0x14, 0x17):
                         break
@@ -41,6 +42,8 @@ def convert_windshield(model, mesh, part_map, strips_by_lod):
                             value, registers = struct.unpack_from("<QQ", mesh, offset)
                             if registers == 0x512:
                                 draw_tags.append((offset, value))
+                            elif share_windshield_tint and registers == 6:
+                                tex0.append((offset, value))
                 if (len(draw_tags) != 2 or draw_tags[0][1] & 0x8000
                         or not draw_tags[1][1] & 0x8000):
                     raise ValueError(f"Unexpected RD2 windshield draw packet in LOD {lod}")
@@ -48,6 +51,11 @@ def convert_windshield(model, mesh, part_map, strips_by_lod):
                 # The clipper still consumes the full reflection packet. XYZ3 preserves
                 # its vertex updates without drawing the additive reflection triangles.
                 struct.pack_into("<Q", output, offset + 8, 0xd12)
+                if tuple(value for _, value in tex0) == (
+                        0x20068305e1313100, 0x20068185e1313300, 0x20068305e1313100):
+                    # The Lancer's alternate binding at 0x3300 samples livery pixels in RD3.
+                    # Use the matching tinted page and palette from the other two bindings.
+                    struct.pack_into("<Q", output, tex0[1][0], tex0[0][1])
                 strips += 1
         if strips != expected_strips:
             raise ValueError(f"Unexpected RD2 windshield strip count in LOD {lod}")

@@ -10,12 +10,13 @@ import re
 import struct
 from tempfile import TemporaryDirectory
 
-from BuildDtmVariant import read_disc_range
+from BuildDtmVariant import append_variant, read_disc_range
 from BuildRd2Db5Variant import build as build_db5, member, tire_radii, verify_wheel_lods
+from BuildRoadAmericaMod import EVENT_CATALOG_BYTES, EVENT_CATALOG_SECTOR, repack_jpak
 from BuildTrackCollisionOverlay import DONOR_DIRECTORY_HASH, REFERENCE_DIRECTORY_HASH, SECTOR_SIZE, read_exact, verify_directory
 from ConvertRd2CarGlass import convert_windshield
 from ConvertRd2CarModel import convert_model, convert_textures
-from ModAssets import REFERENCE_PACKAGES
+from ModAssets import REFERENCE_PACKAGES, replace_member
 from Ps2CarModel import inspect_model, relocation_table
 from Ps2CarTexture import body_uploads
 from Rd2AssetCatalog import car_packages, read_index, scan_disc
@@ -24,9 +25,11 @@ from Rd2AssetCatalog import car_packages, read_index, scan_disc
 RD2_CLASSES = {"vintage": (1, 787442, 7009268)}
 PLAYABLE = {"db5": ("Aston Martin DB5", build_db5)}
 WINDSHIELD_STRIPS = {
+    "evo7": (6, 5, 3, 4, 4),
     "fal_ba": (7, 5, 1, 1, 4),
     "mustang68": (1, 1, 1, 1, 4),
 }
+DTM_MESH_LIMIT = 512 * 1024
 
 
 def donor_class(disc, extent, *, reference_layout=True):
@@ -100,12 +103,57 @@ def convert_car(archive, variant, disc):
         native_vu_banks=car != "fal_ba")
     if car in WINDSHIELD_STRIPS:
         strips = WINDSHIELD_STRIPS[car]
-        high = convert_windshield(model, high, part_map, {0: strips[0]})
-        low = convert_windshield(model, low, part_map, dict(enumerate(strips[1:], start=1)))
+        high = convert_windshield(model, high, part_map, {0: strips[0]}, share_windshield_tint=car == "evo7")
+        low = convert_windshield(model, low, part_map, dict(enumerate(strips[1:], start=1)),
+                                 share_windshield_tint=car == "evo7")
     texture = convert_textures(member(archive, f"{variant}.tex"), member(template, "dtmx_13.tex"))
     high_texture = convert_textures(member(archive, f"{variant}_hi.tex"), read_disc_range(disc, 2, 185648, 381204))
     return {"car.mdl": model, "car_hi.msh": high, "car.msh": low, "part.map": part_map,
             "car.tex": texture, "car_hi.tex": high_texture}
+
+
+def discover_mechanics(disc, variant):
+    number_section = re.compile(rb"(?mi)^\[" + re.escape(variant.encode("ascii")) + rb"(?:_[0-9]+)?\][ \t]*\r?$")
+    required = {"dmg.ini", "int.ini", "num.ini"}
+    matching = set()
+    for package in scan_disc(disc):
+        if required.issubset(package.names) and number_section.search(package.member(disc, "num.ini")):
+            matching.add((package.member(disc, "dmg.ini"), package.member(disc, "int.ini")))
+    if len(matching) != 1:
+        raise ValueError(f"Expected one interior and damage configuration for {variant!r}, found {len(matching)}")
+    return matching.pop()
+
+
+def build_test_pack(rd2, rd3, variant):
+    cars = convert_car(discover_car(rd2, variant), variant, rd3)
+    if max(len(cars["car.msh"]), len(cars["car_hi.msh"])) > DTM_MESH_LIMIT:
+        raise ValueError(f"The converted meshes exceed the {DTM_MESH_LIMIT}-byte test pack limit")
+    damage, interior = discover_mechanics(rd2, variant)
+    stock = read_disc_range(rd3, *REFERENCE_PACKAGES["dtm-cars"])
+    archive = append_variant(stock, cars["car.msh"])
+    car = member(archive, "dtmx_20.big")
+    exterior = re.compile(rb"(?ms)^\[Exterior\]\r\n.*?(?=^\[)")
+    donor_binding = exterior.search(interior)
+    if donor_binding is None or b"Part0=2\r\nNumParts=1\r\n" not in donor_binding[0]:
+        raise ValueError("Expected the Lancer exterior binding for the cockpit camera")
+    cockpit, count = exterior.subn(lambda _: donor_binding[0], member(car, "int.ini"))
+    if count != 1:
+        raise ValueError("Expected one exterior section in the test cockpit")
+    for name, data in (("part.map", cars["part.map"]), ("dmg.ini", damage), ("int.ini", cockpit)):
+        car = replace_member(car, [name], data)
+    archive = repack_jpak(archive, struct.unpack_from("<I", archive, 8)[0], {
+        b"dtmx_20.big": car,
+        b"dtmx_20.tex": cars["car.tex"],
+        b"QA_Touring.mdl": cars["car.mdl"],
+    }, compressor=lambda data: data)
+    events = read_disc_range(rd3, 1, EVENT_CATALOG_SECTOR, EVENT_CATALOG_BYTES)
+    intro = member(events, "1st__.ini")
+    assignment = b"CareerOfferCarID = dtmx_13/CKL"
+    if intro.count(assignment) != 1:
+        raise ValueError("Expected one introductory DTM car assignment")
+    events = replace_member(events, ["1st__.ini"], intro.replace(assignment, b"CareerOfferCarID = dtmx_20/CKL"))
+    return {"DTMX_EXT.JPK": archive, "QA_TOURING_HI.MSH": cars["car_hi.msh"],
+            "DTMX_20_HI.TEX": cars["car_hi.tex"], "events.big": events}
 
 
 def audit_bundle(folder, *, dtm_pack=False):
@@ -139,7 +187,7 @@ def audit_bundle(folder, *, dtm_pack=False):
             page.decode("ascii"): bitmap.size for page, (bitmap, _) in sorted(body_uploads(files[name]).items())
         }
     # These are the current portable DTM overlay's loader limits, in bytes.
-    limits = {"car.mdl": 72716, "car.msh": 376572, "car_hi.msh": 369788, "car_hi.tex": 381204}
+    limits = {"car.mdl": 72716, "car.msh": DTM_MESH_LIMIT, "car_hi.msh": DTM_MESH_LIMIT, "car_hi.tex": 381204}
     report["dtm_preview_oversize"] = {
         name: {"bytes": len(files[name]), "limit": limit}
         for name, limit in limits.items() if len(files[name]) > limit
@@ -154,21 +202,23 @@ def main():
     commands.add_parser("list", help="list the supported playable presets")
     catalog = commands.add_parser("catalog", help="list variants in a donor class")
     convert = commands.add_parser("convert", help="build a development model pair (not a playable pack)")
+    test_pack = commands.add_parser("build-test-pack", help="build a Lancer Evolution VII DTM test pack")
     build = commands.add_parser("build", help="build an add-on for a supported playable preset")
     audit = commands.add_parser("audit", help="check converted model, wheels, textures, and overlay limits")
     audit.add_argument("bundle", type=Path, help="directory produced by convert or build")
     audit.add_argument("--dtm-pack", action="store_true", help="audit the installed DTM variant archive and separate high-detail assets")
-    for command in (catalog, convert, build):
+    for command in (catalog, convert, build, test_pack):
         command.add_argument("--rd2-disc", type=Path, required=True, help="mounted or extracted RD2 disc directory")
     for command in (catalog, convert):
         source = command.add_mutually_exclusive_group()
         source.add_argument("--class", dest="donor_class", choices=("auto", *RD2_CLASSES), default="auto",
                             help="discover variants on the disc (default) or use a named class")
         source.add_argument("--class-range", type=int, nargs=3, metavar=("HUG", "SECTOR", "BYTES"))
-    for command in (convert, build):
+    for command in (convert, build, test_pack):
         command.add_argument("--disc", type=Path, required=True, help="mounted or extracted RD3 disc directory")
         command.add_argument("--output", type=Path, required=True, help="new output directory")
     convert.add_argument("variant", type=str.lower)
+    test_pack.add_argument("variant", type=str.lower, choices=("bs_0",))
     build.add_argument("car", type=str.lower, choices=PLAYABLE)
     sound = build.add_mutually_exclusive_group()
     sound.add_argument("--stock-sound", action="store_true", help="retain the RD3 template engine audio")
@@ -183,7 +233,7 @@ def main():
         if args.command == "audit":
             print(json.dumps(audit_bundle(args.bundle, dtm_pack=args.dtm_pack), indent=2))
             return
-        if args.command != "build":
+        if args.command in ("convert", "catalog"):
             discover = not args.class_range and args.donor_class == "auto"
             if discover and args.command == "catalog":
                 for variant, model, package, _ in sorted(discover_variants(args.rd2_disc),
@@ -201,6 +251,8 @@ def main():
             raise ValueError("Choose a new output directory")
         if args.command == "convert":
             result = convert_car(archive, args.variant, args.disc)
+        elif args.command == "build-test-pack":
+            result = build_test_pack(args.rd2_disc, args.disc, args.variant)
         else:
             _, builder = PLAYABLE[args.car]
             result = builder(args.rd2_disc, args.disc, donor_sound=not args.stock_sound,

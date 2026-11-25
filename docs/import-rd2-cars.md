@@ -38,6 +38,27 @@ The Jaguar passed the asset audit while a Windows replay still showed bands and 
 
 The converter now splits oversized strips of this layout when translating to RD3 banks. Each fragment keeps the three GIF passes plus the original positions, normals, and texture coordinates. Two shared vertices at the seam preserve the triangles and their winding. The converter rebuilds DMA lengths, VIF addresses, call relocations, and per-LOD packet counts. For the Jaguar, four strips become eight and the high-detail model grows from 513 to 517 packets. The installed audit passes and the rebuilt high-detail mesh stays within the preview limit. The matched Oschersleben replay reached frame 12,640 without invalid GS writes or the previous bands. The fixture uses the DB5 cockpit and registration. Local evidence is under `local/modding-preview-combined/qa-rd2-jaguar-compact-split-check/`.
 
-The development DB5 and Lancer outputs also contain strips that use the split. The playable DB5 uses its separately verified layout. The Mustang and Falcon outputs matched the previous converter byte for byte. The Lancer class and high-detail meshes are 454,332 and 503,740 bytes, above the portable preview limits. A diagnostic runner with larger limits loaded the new meshes and reproduced three unknown VIF commands. The replay advanced from the selector to the Oschersleben loading screen and remained there through frame 15,500. Local evidence is under `local/modding-preview-combined/qa-rd2-evo-rebuilt-long-check/`.
+The development DB5 and Lancer outputs also contain strips that use the split. The playable DB5 uses its separately verified layout. The Mustang and Falcon outputs matched the previous strip converter byte for byte.
+
+### Run the Lancer Evolution VII test pack
+
+Build the Windows launcher from the updated source to get the 512 KiB limit for each external mesh. Pass the mounted or extracted PS2 disc directories from your own copies of both games.
+
+```powershell
+$pack = Join-Path $work 'Lancer Evolution VII test'
+python scripts/ImportRd2Car.py build-test-pack bs_0 --rd2-disc $rd2 --disc $rd3 --output $pack
+python scripts/ImportRd2Car.py audit $pack --dtm-pack
+& $launcher --disc $rd3Iso --dtm-mod $pack --data-dir "$work\lancer-test-player"
+```
+
+The importer finds the model by the RD2 class lookup and matches the donor's damage and cockpit metadata through the `bs_0` sections in `num.ini`. The test pack uses the donor damage settings and exterior part binding. It offers the converted Lancer in the introductory Oschersleben DTM race, using the Mercedes registration, mechanics, and cockpit shell. The class and high-detail meshes are 454,332 and 503,740 bytes. A private test disc directory with both BIGF packages moved into a differently numbered HUG produced the same installed pack.
+
+The earlier fixture with Mercedes damage parameters stalled on the Oschersleben loading screen. The first invalid VIF commands appeared at frame 10,444. The guest draw copy contained coordinates in a position that still held the expected UNPACK command in the source model. The VIF1 DMA channel paused after reading the invalid command. Replacing only the damage settings with the donor Lancer configuration let the same input reach the race and run through frame 15,500 without those VIF errors. The final test pack uses the Lancer binding for the exterior in cockpit view and applies the windshield converter at all five detail levels.
+
+The Windows rear-facing replay sampled the windshield at frame 12,500. A GS trace showed that its alternate texture at block `0x3300` sampled the livery and drove a glass pixel to RGB `#FFFFFF`. Binding the alternate pass to the matching tinted texture at `0x3100` and its palette brought the same pixel to `#4D4B48` in the software trace. The Direct3D 12 replay showed the driver through the glass and removed the livery lettering. Fine stippling remains along the lower pane. Local comparison frames are in `local/modding-preview-combined/evo7-windshield-qa.png`.
+
+The Windows 11 Direct3D 12 run on an RTX 4070 used recorded input to finish the one-lap introduction in 21st place in 2:34.30 and reached the classification screen. The game autosaved to a test memory card. A fresh process without a runtime checkpoint read the byte-identical saved card and reached the career championship menu. The result and reload captures are in `local/modding-preview-combined/evo7-finish-review.png` and `local/modding-preview-combined/evo7-autosave-reload-qa.png`.
+
+The donor `int_left.p3d` cockpit is a `CP3D` asset. Its companion `int_left.big` contains the two generic interior TIM2 pages and the digital instruments. The test pack uses the RD3 `PS2M` cockpit for the first checks. The donor cockpit, steering rim framing, standalone registration and mechanics still require separate verification.
 
 A future donor such as Colin McRae: DiRT will need its own archive reader and format converter. RD2-specific disc identification is deliberately kept separate from the RD3 packaging workflow.

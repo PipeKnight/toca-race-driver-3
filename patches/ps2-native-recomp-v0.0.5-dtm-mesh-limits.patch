@@ -1,0 +1,17 @@
+--- a/runtime/src/disc.cpp
++++ b/runtime/src/disc.cpp
+@@ -237,12 +237,12 @@
+ constexpr DtmVariantFile db5_shadow{"CARS\\SHADOWS\\DB5.SHD", "db5.shd", 16384, 0};
+ constexpr std::array dtm_variant_files{
+     DtmVariantFile{"CARDATA\\DTMX\\DTMX.JPK", "DTMX_EXT.JPK", 8 * 1024 * 1024, 0},
+-    DtmVariantFile{"CARDATA\\DTMX\\QA_TOURING_HI.MSH", "QA_TOURING_HI.MSH", 369788, 0},
++    DtmVariantFile{"CARDATA\\DTMX\\QA_TOURING_HI.MSH", "QA_TOURING_HI.MSH", 512 * 1024, 0},
+     DtmVariantFile{"CARDATA\\DTMX\\DTMX_20_HI.TEX", "DTMX_20_HI.TEX", 381204, 0},
+     DtmVariantFile{"CARDATA\\DTMX\\DTMX_20.BIG", "dtmx_20.big", 27264, 27264},
+     DtmVariantFile{"CARDATA\\DTMX\\LOOKUP.INI", "lookup.ini", 460, 460},
+     DtmVariantFile{"CARDATA\\DTMX\\QA_TOURING.MDL", "QA_Touring.mdl", 72716, 0},
+-    DtmVariantFile{"CARDATA\\DTMX\\QA_TOURING.MSH", "QA_Touring.msh", 376572, 0},
++    DtmVariantFile{"CARDATA\\DTMX\\QA_TOURING.MSH", "QA_Touring.msh", 512 * 1024, 0},
+     DtmVariantFile{"SOUND\\CARS.BIG", "cars.big", 2 * 1024 * 1024, 0},
+     DtmVariantFile{"SOUND\\SYSTEM.ICZ", "system.icz", 2048, 0},
+     db5_type_catalog,

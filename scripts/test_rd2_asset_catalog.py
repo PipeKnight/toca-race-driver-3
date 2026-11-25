@@ -6,8 +6,10 @@ import struct
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 from BuildRoadAmericaMod import convert_pit, convert_route, pit_distances, road_america_weather, route_counts
+from ImportRd2Car import discover_mechanics
 from ImportRd2Track import check_ground, check_ground_segments
 from Rd2AssetCatalog import BIGF_ENTRY, HEADER, HEADER_BYTES, SECTOR_SIZE, read_index, scan_disc
 from Ps2TrackCollision import GRID_CELLS
@@ -22,6 +24,20 @@ def archive(names):
 
 
 class Rd2AssetCatalogTests(unittest.TestCase):
+    def test_cockpit_and_damage_lookup_uses_the_number_configuration_variant(self):
+        def package(number, damage, interior):
+            files = {"num.ini": number, "dmg.ini": damage, "int.ini": interior}
+            return SimpleNamespace(names=tuple(files), member=lambda _, name: files[name])
+
+        prefix = package(b"[bs_01_0]\r\n", b"other damage", b"other interior")
+        first = package(b"[BS_0_0]\r\n", b"evo damage", b"evo interior")
+        with patch("ImportRd2Car.scan_disc", return_value=(prefix, first, first)):
+            self.assertEqual(discover_mechanics(Path("RD2"), "bs_0"), (b"evo damage", b"evo interior"))
+        other = package(b"[bs_0]\r\n", b"different damage", b"evo interior")
+        with patch("ImportRd2Car.scan_disc", return_value=(first, other)):
+            with self.assertRaisesRegex(ValueError, "found 2"):
+                discover_mechanics(Path("RD2"), "bs_0")
+
     def test_disc_scan_finds_relocated_package_with_an_unknown_directory(self):
         with TemporaryDirectory() as parent:
             disc = Path(parent)
