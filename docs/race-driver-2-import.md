@@ -270,6 +270,10 @@ The corrected route passed the structural check on all 67 indexed donor scenes. 
 
 On A1-Ring Short, an earlier import sent the player below the terrain during the mandatory stop. Changing only the numeric distance at the pit finish line could also lock race progression at that point. With the rebuilt distance axis and sixteen assignments, the Windows test reached the pit service countdown, completed it, returned to the racing surface, and gave the player control on lap three. The tested route matched the archive's lane coordinates and its pit distances within 0.2 mm. The continuation finished all five laps and placed Player One 14th in **6:52.98** after penalties were applied. One AI received a DSQ. The autosave passed the memory-card filesystem and ECC check and cold-loaded byte-for-byte.
 
-The Adelaide test drove through the pit lane on lap one without being serviced. The second-lap entry reached the service countdown and returned control to the player on the racing surface on lap three. Full mandatory classification remains open. Both results are recorded in the circuit checklist.
+#### Verify Adelaide pit service and classification
+
+The Adelaide test drove through the pit lane on lap one without being serviced. The second-lap entry reached the service countdown and returned control to the player on the racing surface on lap three. The continuation drove through lap five on the same rebuilt pit-distance and sixteen-stall pack. Race Results classified Player One 19th in **12:22.68** and marked Murphy as disqualified. The reason for the AI disqualification and full-field pit acceptance remain open.
+
+The autosave passed the memory-card filesystem and ECC check. A cold launch of the normal runner opened the saved career, read 341 pages, and left the card byte-identical. Local captures are in `local/modding-preview-combined/qa-adelaide-distance-pit-second-lap/pit-service-and-exit.png`, `local/modding-preview-combined/qa-adelaide-mandatory-results/classification.png`, and `local/modding-preview-combined/qa-adelaide-mandatory-cold/profile.png`.
 
 The builder reports incompatible route sections, ambiguous scene pairings, missing scene members, or converted scenes that exceed the reference extent. The multi-course builder also supports the verified Road America Rain scene.
