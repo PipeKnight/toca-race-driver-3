@@ -16,7 +16,7 @@ from BuildRoadAmericaMod import EVENT_CATALOG_BYTES, EVENT_CATALOG_SECTOR, repac
 from BuildTrackCollisionOverlay import DONOR_DIRECTORY_HASH, REFERENCE_DIRECTORY_HASH, SECTOR_SIZE, read_exact, verify_directory
 from ConvertRd2CarGlass import convert_windshield
 from ConvertRd2CarModel import convert_model, convert_textures
-from ConvertRd2LancerCockpit import convert_wheel
+from ConvertRd2LancerCockpit import DTM_STEERING_X, convert_wheel
 from ModAssets import REFERENCE_PACKAGES, replace_member
 from Ps2CarModel import inspect_model, relocation_table
 from Ps2CarTexture import body_uploads
@@ -160,7 +160,7 @@ def build_test_pack(rd2, rd3, variant, *, donor_wheel=False):
     if count != 1:
         raise ValueError("Expected one exterior section in the test cockpit")
     if donor_wheel:
-        camera = b"[Camera]\r\nAngle=0.05\r\nZoom=0.85\r\nZ=0.16\r\nY=0.915\r\nX=-0.36\r\n"
+        camera = f"[Camera]\r\nAngle=0.05\r\nZoom=0.85\r\nZ=0.16\r\nY=0.915\r\nX={DTM_STEERING_X:.4f}\r\n".encode("ascii")
         cockpit, count = re.subn(rb"(?ms)^\[Camera\]\r\n.*?(?=^\[Shift\])", lambda _: camera, cockpit)
         if count != 1 or cockpit.count(b"ModelName=int_dtm\r\n") != 1:
             raise ValueError("Expected the DTM template's model and camera settings")

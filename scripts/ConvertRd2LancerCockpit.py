@@ -12,6 +12,12 @@ from Ps2CockpitModel import cockpit_draw_packets, cockpit_sections
 from Rd2Ps2Cockpit import cockpit_group, cockpit_part
 
 
+# Front rim of the instrument recess in the RD3 DTM cockpit shell.
+DTM_STEERING_X = -.2465
+DTM_COWL_FRONT_Z = .285
+DTM_DISPLAY_Y = .140
+
+
 def clut_slot(index):
     return (index & ~24) | ((index & 8) << 1) | ((index & 16) >> 1)
 
@@ -150,12 +156,7 @@ def add_instruments(cabin, donor_cockpit, steering_x):
     overlay_material, overlay = cockpit_group(donor_cockpit, 4)
     if material != "gen02" or overlay_material != "gen02" or len(face) != 1 or len(overlay) != 1:
         raise ValueError("Unexpected Lancer instrument material or strip count")
-    display = Strips()
-    for points, uv in face:
-        display.add(points, (((64.5 + 31 * (u * 256 - 132) / 73) / 128,
-                              (96.5 + 31 * (v * 256 - 33) / 111) / 128) for u, v in uv))
-    cabin.append("evo_speed_display", "int_main_body", IDENTITY, display.mesh, display.strips)
-
+    face_points, face_uv = face[0]
     plane, _ = overlay[0]
     if len(plane) != 4 or max(z for _, _, z in plane) - min(z for _, _, z in plane) > .001:
         raise ValueError("Expected the Lancer's flat digital display overlay")
@@ -163,6 +164,16 @@ def add_instruments(cabin, donor_cockpit, steering_x):
     xmax, ymax, _ = (max(axis) for axis in zip(*plane))
     if abs((xmin + xmax) * .5 - steering_x) > .004:
         raise ValueError("The Lancer display does not line up with the steering column")
+    # Mount the face just in front of the cowl and below the top of the rim.
+    # Apply the same translation to the digits and units to retain their glass clearance.
+    mount = bytearray(IDENTITY)
+    face_z = face_points[0][2]
+    struct.pack_into("<3f", mount, 48, DTM_STEERING_X - steering_x,
+                     DTM_DISPLAY_Y - .5 * (ymin + ymax), DTM_COWL_FRONT_Z - .007 - face_z)
+    display = Strips()
+    display.add(face_points, (((64.5 + 31 * (u * 256 - 132) / 73) / 128,
+                              (96.5 + 31 * (v * 256 - 33) / 111) / 128) for u, v in face_uv))
+    cabin.append("evo_speed_display", "int_main_body", mount, display.mesh, display.strips)
     width, height = xmax - xmin, ymax - ymin
 
     def quad(left, right, bottom, top, box):
@@ -175,7 +186,7 @@ def add_instruments(cabin, donor_cockpit, steering_x):
     for slot in range(3):
         digit = Strips()
         digit.add(*quad(.12 + slot * .25, .36 + slot * .25, .39, .88, (126.5, 127.5, 127.5, 127.5)))
-        cabin.append(f"evo_speed_digit{slot}", "int_main_body", IDENTITY, digit.mesh, digit.strips)
+        cabin.append(f"evo_speed_digit{slot}", "int_main_body", mount, digit.mesh, digit.strips)
         packet = bytearray(cabin.draws[-1])
         draw = next(cockpit_draw_packets(packet, 40, len(packet)))
         if (packet[60:72] != bytes(12) or draw.uv.payload != 236
@@ -186,20 +197,31 @@ def add_instruments(cabin, donor_cockpit, steering_x):
 
     units = Strips()
     units.add(*quad(.23, .77, .08, .30, (112.5, 116.5, 127.5, 125.5)))
-    cabin.append("evo_speed_units", "int_main_body", IDENTITY, units.mesh, units.strips)
+    cabin.append("evo_speed_units", "int_main_body", mount, units.mesh, units.strips)
 
 
 def convert_wheel(donor_cockpit, donor_texture, donor_digits, target, target_archive, target_atlas):
     matrix, material, source = cockpit_part(donor_cockpit, 20)
     if material != "gen02" or len(source) != 20:
         raise ValueError("Unexpected Lancer steering wheel material or strip count")
+    steering_x, _, steering_z = struct.unpack_from("<3f", matrix, 48)
+    mount = bytearray(matrix)
+    struct.pack_into("<f", mount, 48, DTM_STEERING_X)
     wheel = Strips()
     column = Strips()
     for points, texcoords in source:
         if any(not 0 <= u < .5 or not 0 <= v <= 1 for u, v in texcoords):
             raise ValueError("The Lancer steering wheel uses texture coordinates outside its atlas region")
-        if max(z for _, _, z in points) > .15 and max(math.hypot(x, y) for x, y, _ in points) < .021:
-            column.add(points, (wheel_uv(.12, .92),) * len(points))
+        end = max(z for _, _, z in points)
+        if end > .15 and max(math.hypot(x, y) for x, y, _ in points) < .021:
+            start = min(z for _, _, z in points)
+            forward_z, = struct.unpack_from("<f", matrix, 40)
+            if end - start < .05 or forward_z < .5 or steering_z >= DTM_COWL_FRONT_Z:
+                raise ValueError("Unexpected Lancer steering column dimensions")
+            attached_end = (DTM_COWL_FRONT_Z - steering_z) / forward_z
+            scale = (attached_end - start) / (end - start)
+            stretched = tuple((x, y, start + (z - start) * scale) for x, y, z in points)
+            column.add(stretched, (wheel_uv(.12, .92),) * len(points))
         else:
             wheel.add(points, (wheel_uv(u, v) for u, v in texcoords))
     if len(column.strips) != 1:
@@ -207,8 +229,7 @@ def convert_wheel(donor_cockpit, donor_texture, donor_digits, target, target_arc
     close_wheel_rim(wheel, source)
     image, palette = combine_atlas(target_atlas, donor_texture, donor_digits)
     cabin = Cabin(fit_stock_atlas(target))
-    cabin.append("evo_steering_column", "int_main_body", matrix, column.mesh, column.strips)
-    cabin.append("steering_wheel", "int_main_body", matrix, wheel.mesh, wheel.strips)
-    steering_x, = struct.unpack_from("<f", matrix, 48)
+    cabin.append("evo_steering_column", "int_main_body", mount, column.mesh, column.strips)
+    cabin.append("steering_wheel", "int_main_body", mount, wheel.mesh, wheel.strips)
     add_instruments(cabin, donor_cockpit, steering_x)
     return embedded_atlas(cabin.encode(), image, palette), companion_atlas(target_archive, image, palette)
