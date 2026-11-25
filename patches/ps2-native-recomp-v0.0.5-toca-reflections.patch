@@ -68,7 +68,7 @@
  // Bump this when the generated code changes in a way the headers do not show (a change in this file): libraries made earlier
  // are then left alone and built again (vu_live.cpp).
 -const char *const kGeneratorVersion = "vurecomp 6";
-+const char *const kGeneratorVersion = "vurecomp 6 toca-efu";
++const char *const kGeneratorVersion = "vurecomp 6 toca-efu-windshield";
  
  Result generate_files(std::vector<Input> inputs, const fs::path &out_dir, std::uint64_t live_stamp, std::size_t per_file, bool with_targets) {
      std::vector<Program> programs;
@@ -191,9 +191,9 @@
 +    bool (*toca_efu_enabled)();
  };
 +
-+// Recognize the two verified entries of the TOCA car lighting program.
++// Recognize the TOCA car lighting entries used for bodywork and glass.
 +inline bool toca_efu_program(const std::uint8_t *code, std::uint32_t pc) {
-+    if (pc != 0x1D10u && pc != 0x2410u) return false;
++    if (pc != 0x1D10u && pc != 0x2410u && pc != 0x2428u && pc != 0x2A90u) return false;
 +    std::uint64_t first_sum, sum_and_read[2];
 +    std::memcpy(&first_sum, code + 0x21B0, sizeof first_sum);
 +    std::memcpy(sum_and_read, code + 0x2208, sizeof sum_and_read);
