@@ -65,4 +65,17 @@ In the RD2 PS2 `int_left.p3d` sample, the word after `CP3D` is `0x02060101`. A l
 
 At directory offset `0x20`, a count of 47 and a table pointer lead to a set of eight-byte records. The first word in each record points to a 16-byte aligned packet. In the first nine packets, the word at packet offset `0x28` points to either `gen01` or `gen02`. At directory offset `0x28`, another count and table pointer lead to 607 32-bit file offsets. This table reaches the end of the file. The ZModeler RaceDriverP3D import source expects a version word of `2`, so this sample requires its own format reader.
 
+#### Test the donor steering wheel
+
+```powershell
+$wheelPack = Join-Path $work 'Lancer Evolution VII steering test'
+python scripts/ImportRd2Car.py build-test-pack bs_0 --rd2-disc $rd2 --disc $rd3 --output $wheelPack --donor-wheel
+python scripts/ImportRd2Car.py audit $wheelPack --dtm-pack
+& $launcher --disc $rd3Iso --dtm-mod $wheelPack --data-dir "$work\lancer-steering-player"
+```
+
+The importer finds `int_left.p3d` and its companion archive by member name. CP3D part 20 supplies the steering transform, twenty strips, and texture coordinates for `gen02`. Each DMA packet uploads positions, colors, UVs, and packed normals before calling the VU drawing program. The importer writes positions and remapped UVs into the RD3 cockpit strip layout. It adds the result to the `steering_wheel` node in its own `int_evo` model, using the animated part's donor transform.
+
+The donor rim itself stops near the ten- and two-o'clock positions. The optional pack closes the upper opening with five strips derived from cross-sections of both exposed ends. The neutral, full-left, full-right, and recentered Windows Direct3D 12 frames show the complete upper arc. The lower and wider camera keeps the road and more of the rim visible, including at 66 mph. Cockpit instruments, precise steering pivot alignment, and the rest of the donor interior remain open. Captures are in `local/modding-preview-combined/qa-evo-donor-wheel-closed/steering-review.png`.
+
 A future donor such as Colin McRae: DiRT will need its own archive reader and format converter. RD2-specific disc identification is deliberately kept separate from the RD3 packaging workflow.

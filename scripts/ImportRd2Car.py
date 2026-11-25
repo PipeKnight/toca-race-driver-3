@@ -16,6 +16,7 @@ from BuildRoadAmericaMod import EVENT_CATALOG_BYTES, EVENT_CATALOG_SECTOR, repac
 from BuildTrackCollisionOverlay import DONOR_DIRECTORY_HASH, REFERENCE_DIRECTORY_HASH, SECTOR_SIZE, read_exact, verify_directory
 from ConvertRd2CarGlass import convert_windshield
 from ConvertRd2CarModel import convert_model, convert_textures
+from ConvertRd2LancerCockpit import convert_wheel
 from ModAssets import REFERENCE_PACKAGES, replace_member
 from Ps2CarModel import inspect_model, relocation_table
 from Ps2CarTexture import body_uploads
@@ -125,13 +126,31 @@ def discover_mechanics(disc, variant):
     return matching.pop()
 
 
-def build_test_pack(rd2, rd3, variant):
+def discover_cockpit(disc, model):
+    model_name, texture_name = f"{model}.p3d", f"{model}.big"
+    matches = {(package.member(disc, model_name), package.member(disc, texture_name))
+               for package in scan_disc(disc) if {model_name, texture_name}.issubset(package.names)}
+    if len(matches) != 1:
+        raise ValueError(f"Expected one model and texture archive for {model!r}, found {len(matches)}")
+    return matches.pop()
+
+
+def build_test_pack(rd2, rd3, variant, *, donor_wheel=False):
     cars = convert_car(discover_car(rd2, variant), variant, rd3)
     if max(len(cars["car.msh"]), len(cars["car_hi.msh"])) > DTM_MESH_LIMIT:
         raise ValueError(f"The converted meshes exceed the {DTM_MESH_LIMIT}-byte test pack limit")
     damage, interior = discover_mechanics(rd2, variant)
     stock = read_disc_range(rd3, *REFERENCE_PACKAGES["dtm-cars"])
-    archive = append_variant(stock, cars["car.msh"])
+    extra_members = ()
+    if donor_wheel:
+        if b"\r\nModelName=int_left\r\n" not in interior:
+            raise ValueError("Expected the Lancer's int_left donor cockpit")
+        donor_model, donor_archive = discover_cockpit(rd2, "int_left")
+        stock_archive = member(stock, "int_dtm.big")
+        px, big = convert_wheel(donor_model, member(donor_archive, "gen02.tm2"),
+                                member(stock, "int_dtm.px"), stock_archive, member(stock_archive, "int_01.tm2"))
+        extra_members = ((b"int_evo.px", b"int_dtm.px", px), (b"int_evo.big", b"int_dtm.big", big))
+    archive = append_variant(stock, cars["car.msh"], extra_members=extra_members)
     car = member(archive, "dtmx_20.big")
     exterior = re.compile(rb"(?ms)^\[Exterior\]\r\n.*?(?=^\[)")
     donor_binding = exterior.search(interior)
@@ -140,6 +159,12 @@ def build_test_pack(rd2, rd3, variant):
     cockpit, count = exterior.subn(lambda _: donor_binding[0], member(car, "int.ini"))
     if count != 1:
         raise ValueError("Expected one exterior section in the test cockpit")
+    if donor_wheel:
+        camera = b"[Camera]\r\nAngle=0.05\r\nZoom=0.85\r\nZ=0.16\r\nY=0.915\r\nX=-0.36\r\n"
+        cockpit, count = re.subn(rb"(?ms)^\[Camera\]\r\n.*?(?=^\[Shift\])", lambda _: camera, cockpit)
+        if count != 1 or cockpit.count(b"ModelName=int_dtm\r\n") != 1:
+            raise ValueError("Expected the DTM template's model and camera settings")
+        cockpit = cockpit.replace(b"ModelName=int_dtm\r\n", b"ModelName=int_evo\r\n")
     for name, data in (("part.map", cars["part.map"]), ("dmg.ini", damage), ("int.ini", cockpit)):
         car = replace_member(car, [name], data)
     archive = repack_jpak(archive, struct.unpack_from("<I", archive, 8)[0], {
@@ -220,6 +245,7 @@ def main():
         command.add_argument("--output", type=Path, required=True, help="new output directory")
     convert.add_argument("variant", type=str.lower)
     test_pack.add_argument("variant", type=str.lower, choices=("bs_0",))
+    test_pack.add_argument("--donor-wheel", action="store_true", help="install the experimental RD2 steering wheel")
     build.add_argument("car", type=str.lower, choices=PLAYABLE)
     sound = build.add_mutually_exclusive_group()
     sound.add_argument("--stock-sound", action="store_true", help="retain the RD3 template engine audio")
@@ -253,7 +279,7 @@ def main():
         if args.command == "convert":
             result = convert_car(archive, args.variant, args.disc)
         elif args.command == "build-test-pack":
-            result = build_test_pack(args.rd2_disc, args.disc, args.variant)
+            result = build_test_pack(args.rd2_disc, args.disc, args.variant, donor_wheel=args.donor_wheel)
         else:
             _, builder = PLAYABLE[args.car]
             result = builder(args.rd2_disc, args.disc, donor_sound=not args.stock_sound,
