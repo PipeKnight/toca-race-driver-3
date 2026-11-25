@@ -135,8 +135,20 @@ def audit_pack(pack, slot, weather="sunny"):
     nested = find_member(data, "osc1.big")[0].read(data)
     main, pit, grid = read_route(find_member(nested, "osc1.ail")[0].read(nested))
     mesh = Collision(find_member(data, "col.col")[0].read(data))
-    lanes = {"main": main.lanes[3], "pit": pit.lanes[2], "grid_left": grid.lanes[0], "grid_right": grid.lanes[1]}
+    lanes = {
+        "main": main.lanes[3],
+        "pit": pit.lanes[2],
+        "pit_left": pit.lanes[0],
+        "pit_right": pit.lanes[1],
+        "grid_left": grid.lanes[0],
+        "grid_right": grid.lanes[1],
+    }
     sectors = [(i, round(event[2], 2), event[5]) for i, event in enumerate(main.events) if event[3] == 2]
+    first_pit_gate = next((i for i, event in enumerate(pit.events) if event[3] == 5), None)
+    approach_widths = []
+    if first_pit_gate is not None:
+        approach_widths = [round(math.dist(left, right), 2) for left, right
+                           in zip(pit.lanes[0][:first_pit_gate + 1], pit.lanes[1][:first_pit_gate + 1], strict=True)]
     stall_starts = {event[4]: i for i, event in enumerate(pit.events) if event[3:6:2] == (3, 1)}
     stall_ends = {event[4]: i for i, event in enumerate(pit.events) if event[3] == 4}
     stall_paths = {tag: pit.lanes[3][start:stall_ends[tag] + 1]
@@ -151,6 +163,8 @@ def audit_pack(pack, slot, weather="sunny"):
         "sector_markers": [{"station": i, "distance_m": distance, "argument": argument}
                            for i, distance, argument in sectors],
         "pit_entry_markers_m": [round(event[2], 2) for event in main.events if event[3] in (1, 3)],
+        "pit_first_gate_station": first_pit_gate,
+        "pit_approach_widths_m": approach_widths,
         "pit_stall_tags": sorted(stall_starts),
         "unassigned_rd3_pit_stalls": sorted(set(range(PIT_STALL_COUNT)) - stall_paths.keys()),
         "pit_stalls_without_end_marker": sorted(stall_starts.keys() - stall_paths.keys()),
