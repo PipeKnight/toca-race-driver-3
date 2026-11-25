@@ -18,7 +18,7 @@ from ConvertRd2CarModel import convert_model, convert_textures
 from ModAssets import REFERENCE_PACKAGES
 from Ps2CarModel import inspect_model, relocation_table
 from Ps2CarTexture import body_uploads
-from Rd2AssetCatalog import car_packages, scan_disc
+from Rd2AssetCatalog import car_packages, read_index, scan_disc
 
 
 RD2_CLASSES = {"vintage": (1, 787442, 7009268)}
@@ -29,13 +29,21 @@ WINDSHIELD_STRIPS = {
 }
 
 
-def donor_class(disc, extent):
-    verify_directory(disc / "RD2.DIR", DONOR_DIRECTORY_HASH)
+def donor_class(disc, extent, *, reference_layout=True):
+    if reference_layout:
+        verify_directory(disc / "RD2.DIR", DONOR_DIRECTORY_HASH)
     hug, sector, size = extent
-    if hug not in (0, 1, 2) or sector < 0 or not 0 < size <= 32 * 1024 * 1024:
-        raise ValueError("Invalid class range (HUG 0–2, non-negative sector, at most 32 MiB)")
+    if hug < 0 or sector < 0 or not 0 < size <= 32 * 1024 * 1024:
+        raise ValueError("Invalid class range (non-negative HUG and sector, at most 32 MiB)")
     with (disc / f"RD2_{hug}.HUG").open("rb") as stream:
-        return read_exact(stream, sector * SECTOR_SIZE, size)
+        start = sector * SECTOR_SIZE
+        end = start + size
+        if stream.seek(0, 2) < end:
+            raise ValueError("Class range extends beyond the RD2 archive")
+        package = read_index(stream, start, end, hug)
+        if package is None or not tuple(car_packages((package,))):
+            raise ValueError("Class range does not contain an indexed RD2 vehicle package")
+        return read_exact(stream, start, size)
 
 
 def variant_lookup(data):
@@ -183,7 +191,8 @@ def main():
                     print(f"{variant:<12} {model:<16} HUG {package.hug}, sector {package.sector}")
                 return
             archive = (discover_car(args.rd2_disc, args.variant) if discover else
-                       donor_class(args.rd2_disc, args.class_range or RD2_CLASSES[args.donor_class]))
+                       donor_class(args.rd2_disc, args.class_range or RD2_CLASSES[args.donor_class],
+                                   reference_layout=args.class_range is None))
             if args.command == "catalog":
                 for variant, model in variants(archive).items():
                     print(f"{variant:<12} {model}")

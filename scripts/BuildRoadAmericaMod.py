@@ -4,6 +4,7 @@
 import argparse
 from bisect import bisect_right
 from dataclasses import dataclass, field
+import hashlib
 from itertools import accumulate, pairwise
 import math
 from pathlib import Path
@@ -14,12 +15,13 @@ import tempfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from BuildTrackCollisionOverlay import (
-    BIGF_ENTRY, DONOR_DIRECTORY_HASH, JPAK_ENTRY, REFERENCE_DIRECTORY_HASH,
-    SECTOR_SIZE, TRACK_BYTES, TRACK_SECTOR, encode_lzss,
+    BIGF_ENTRY, JPAK_ENTRY, REFERENCE_DIRECTORY_HASH,
+    SECTOR_SIZE, TRACK_BYTES, TRACK_SECTOR, collision_counts, encode_lzss,
     read_exact, verify_directory,
 )
 from BuildTrackGeometryOverlay import DMA_BYTES, DMA_SECTOR, make_overlay
 from Ps2TrackRoute import PIT_STALL_COUNT
+from Rd2AssetCatalog import choose_route, circuits, scan_disc
 
 
 TRACK_CATALOG_SECTOR = 80673
@@ -30,7 +32,10 @@ RAIN_TRACK_SECTOR = 510880
 RAIN_TRACK_BYTES = 1363456
 RAIN_DMA_SECTOR = 513312
 RAIN_DMA_BYTES = 3568768
-ROAD_AMERICA_RAIN_DONOR_SECTOR = 976987
+ROAD_AMERICA_SKY = {
+    "sunny": "4b110ed1ddd9ff85dd96986488d7ab601633f4ce15b153a7d922d2d15563adc3",
+    "rain": "761305ed720e75beb31eac11d00e384ee12daa90acd9d2ad5a9db4dfc08c9019",
+}
 
 
 @dataclass(frozen=True)
@@ -45,16 +50,12 @@ class TrackEntry:
 @dataclass(frozen=True)
 class Course(TrackEntry):
     donor_prefix: str
-    route_package: tuple[int, int, int]  # Sector, BIGF entry count, expected .aid size.
-    scene_package: tuple[int, int, int]  # Sector, BIGF entry count, expected col.col size.
-    route_counts: tuple[int, int, int]  # Main, pit, and auxiliary route lengths.
 
 
-ROAD_AMERICA = Course("tqa1", "Road America", "6.057", 19, "roa",
-                      (805031, 50, 23884), (973763, 47, 573324), (387, 42, 50))
+ROAD_AMERICA = Course("tqa1", "Road America", "6.057", 19, "roa")
 A1_RING = (
-    Course("tqa2", "A1-Ring GP", "4.293", 34, "a11", (803257, 25, 20364), (805290, 36, 595956), (306, 79, 36)),
-    Course("tqa3", "A1-Ring Short", "2.303", 35, "a12", (803292, 23, 10956), (808393, 35, 558396), (114, 79, 28)),
+    Course("tqa2", "A1-Ring GP", "4.293", 34, "a11"),
+    Course("tqa3", "A1-Ring Short", "2.303", 35, "a12"),
 )
 
 
@@ -136,17 +137,49 @@ def event_catalog(original, courses=(ROAD_AMERICA,), *, existing_rounds=9, add_o
     return repack_bigf(original, members, base, (base + 31) & ~31, len(original))
 
 
-def read_donor_member(donor, package, member):
-    sector, entries, size = package
-    start = sector * SECTOR_SIZE
-    magic, count, base = struct.unpack("<4sII", read_exact(donor, start, 12))
-    if magic != b"BIGF" or count != entries or base < 0x24 + count * BIGF_ENTRY.size:
-        raise ValueError(f"Unexpected donor BIGF at sector {sector}")
-    directory = read_exact(donor, start + 0x24, count * BIGF_ENTRY.size)
-    for name, length, relative in BIGF_ENTRY.iter_unpack(directory):
-        if name.rstrip(b"\0") == member and length == size:
-            return read_exact(donor, start + base + relative, length)
-    raise ValueError(f"Missing or unexpected donor member {member!r}")
+def road_america_weather(disc, scenes, sunny_number=None, rain_number=None):
+    signatures = {
+        scene: hashlib.sha256(scene.member(disc, "roa_sky.dma")).hexdigest()
+        for scene in scenes if "roa_sky.dma" in scene.names
+    }
+
+    def select(weather, number):
+        if number is not None:
+            if not 1 <= number <= len(scenes):
+                raise ValueError(f"Road America {weather} scene must be between 1 and {len(scenes)}")
+            return scenes[number - 1]
+        matches = [scene for scene, digest in signatures.items() if digest == ROAD_AMERICA_SKY[weather]]
+        if len(matches) > 1:
+            raise ValueError(f"Several Road America scenes match {weather}. Choose --road-america-{weather}-scene")
+        return next(iter(matches), None)
+
+    sunny = select("sunny", sunny_number)
+    rain = select("rain", rain_number)
+    if sunny is None and len(scenes) == 1 and rain is None:
+        sunny = scenes[0]
+    if sunny is None:
+        raise ValueError("Could not identify a sunny Road America scene. Run ImportRd2Track.py catalog and "
+                         "choose --road-america-sunny-scene, or build one scene with ImportRd2Track.py build")
+    if sunny == rain:
+        raise ValueError("Choose different Road America scenes for Sunny and Rain")
+    return sunny, rain
+
+
+def route_counts(source):
+    if len(source) < 12 or source[:6] != bytes.fromhex("060d01200005"):
+        raise ValueError("Unsupported RD2 closed-circuit AID header")
+    main, = struct.unpack_from("<H", source, 6)
+    pit_at = 12 + main * 48
+    if not main or pit_at + 8 > len(source):
+        raise ValueError("Truncated RD2 main route")
+    pit_kind, pit_lanes, pit = struct.unpack_from("<BBH", source, pit_at)
+    aux_at = pit_at + 8 + pit * 32
+    if (pit_kind, pit_lanes) != (1, 3) or not pit or aux_at + 8 > len(source):
+        raise ValueError("Unsupported or truncated RD2 pit route")
+    aux_kind, aux_lanes, auxiliary = struct.unpack_from("<BBH", source, aux_at)
+    if (aux_kind, aux_lanes) != (2, 2) or not auxiliary or aux_at + 8 + auxiliary * 24 > len(source):
+        raise ValueError("Unsupported or truncated RD2 grid route")
+    return main, pit, auxiliary
 
 
 def expand_pit_stalls(lanes, rows, lap_length):
@@ -261,8 +294,8 @@ def pit_distances(lanes, events, lap_length):
             for (tag, argument, code, _), distance in zip(events, distances, strict=True)]
 
 
-def convert_route(source, counts=ROAD_AMERICA.route_counts):
-    main_count, pit_count, aux_count = counts
+def convert_route(source, counts=None):
+    main_count, pit_count, aux_count = route_counts(source) if counts is None else counts
     if source[:6] != bytes.fromhex("060d01200005") or struct.unpack_from("<H", source, 6)[0] != main_count:
         raise ValueError("Unexpected donor route header")
 
@@ -406,50 +439,80 @@ def track_package(original, collision, route):
     raise ValueError("Missing nested reference track route")
 
 
+def circuit_payloads(donor, scene, code, original_track, original_dma, route, *, rain=False):
+    collision = scene.member(donor, "col.col")
+    collision_counts(collision)
+    with scene.path(donor).open("rb") as stream:
+        geometry, _ = make_overlay(original_dma, stream, donor_sector=scene.sector, donor_prefix=code,
+                                   donor_members_count=len(scene.entries), reference_members=("sky.dma",) if rain else ())
+    return {"TRACK.JPK": track_package(original_track, collision, route), "DMA1.JPK": geometry}
+
+
+def build_pack(reference_disc, donor, destination, courses, sunny_number=None, rain_number=None):
+    verify_directory(reference_disc / "RDH.DIR", REFERENCE_DIRECTORY_HASH)
+    if destination.exists():
+        raise ValueError("Choose a new add-on output directory")
+    layouts = circuits(scan_disc(donor))
+    scenes = []
+    for course in courses:
+        code = course.donor_prefix
+        if code not in layouts:
+            raise ValueError(f"No compatible scene and collision package found for {course.name} ({code})")
+        choices = layouts[code]["scenes"]
+        if course == ROAD_AMERICA:
+            sunny, rain = road_america_weather(donor, choices, sunny_number, rain_number)
+            scenes.append((course, sunny, rain))
+        elif len(choices) == 1:
+            scenes.append((course, choices[0], None))
+        else:
+            raise ValueError(f"{course.name} has {len(choices)} scenes. Use ImportRd2Track.py build with --scene")
+
+    with (reference_disc / "RDH_1.HUG").open("rb") as reference, tempfile.TemporaryDirectory(dir=destination.parent) as stage:
+        output = Path(stage)
+
+        def read_reference(sector, size):
+            return read_exact(reference, sector * SECTOR_SIZE, size)
+
+        has_rain = any(rain is not None for _, _, rain in scenes)
+        tracks = track_catalog(read_reference(TRACK_CATALOG_SECTOR, TRACK_CATALOG_BYTES), courses)
+        events = event_catalog(read_reference(EVENT_CATALOG_SECTOR, EVENT_CATALOG_BYTES), courses,
+                               rainy_slots=(b"osc1", b"tqa1") if has_rain else (b"osc1",))
+        (output / "tracks.big").write_bytes(tracks)
+        (output / "events.big").write_bytes(events)
+        original_track = read_reference(TRACK_SECTOR, TRACK_BYTES)
+        original_dma = read_reference(DMA_SECTOR, DMA_BYTES)
+        for course, sunny, rain in scenes:
+            code = course.donor_prefix
+            routes = layouts[code]["routes"]
+            folder = output if course == ROAD_AMERICA else output / course.slot
+            folder.mkdir(exist_ok=True)
+            route = convert_route(choose_route(donor, code, routes, sunny))
+            for name, data in circuit_payloads(donor, sunny, code, original_track, original_dma, route).items():
+                (folder / name).write_bytes(data)
+            if rain is not None:
+                folder = output / "rain"
+                folder.mkdir()
+                route = convert_route(choose_route(donor, code, routes, rain))
+                rain_track = read_reference(RAIN_TRACK_SECTOR, RAIN_TRACK_BYTES)
+                rain_dma = read_reference(RAIN_DMA_SECTOR, RAIN_DMA_BYTES)
+                for name, data in circuit_payloads(donor, rain, code, rain_track, rain_dma, route, rain=True).items():
+                    (folder / name).write_bytes(data)
+        output.rename(destination)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("reference_disc", type=Path, help="extracted SLUS-21182 v1.02 disc directory")
-    parser.add_argument("donor_disc", type=Path, help="mounted or extracted SLES-52638 v1.02 disc directory")
+    parser.add_argument("donor_disc", type=Path, help="mounted or extracted Race Driver 2 PS2 disc directory")
     parser.add_argument("output", type=Path, help="new directory for the generated add-on")
     parser.add_argument("--include-a1-ring", action="store_true", help="add separate A1-Ring GP and Short slots")
+    parser.add_argument("--road-america-sunny-scene", type=int, help="one-based Road America scene number from catalog")
+    parser.add_argument("--road-america-rain-scene", type=int, help="one-based Road America rain scene number from catalog")
     args = parser.parse_args()
     try:
-        verify_directory(args.reference_disc / "RDH.DIR", REFERENCE_DIRECTORY_HASH)
-        verify_directory(args.donor_disc / "RD2.DIR", DONOR_DIRECTORY_HASH)
-        if args.output.exists():
-            raise ValueError("Choose a new add-on output directory")
         courses = (ROAD_AMERICA, *A1_RING) if args.include_a1_ring else (ROAD_AMERICA,)
-        with (args.reference_disc / "RDH_1.HUG").open("rb") as reference, \
-             (args.donor_disc / "RD2_1.HUG").open("rb") as donor, tempfile.TemporaryDirectory(dir=args.output.parent) as stage:
-            output = Path(stage)
-            tracks = track_catalog(read_exact(reference, TRACK_CATALOG_SECTOR * SECTOR_SIZE, TRACK_CATALOG_BYTES), courses)
-            events = event_catalog(read_exact(reference, EVENT_CATALOG_SECTOR * SECTOR_SIZE, EVENT_CATALOG_BYTES), courses)
-            (output / "tracks.big").write_bytes(tracks)
-            (output / "events.big").write_bytes(events)
-            original_track = read_exact(reference, TRACK_SECTOR * SECTOR_SIZE, TRACK_BYTES)
-            original_dma = read_exact(reference, DMA_SECTOR * SECTOR_SIZE, DMA_BYTES)
-            for course in courses:
-                folder = output if course == ROAD_AMERICA else output / course.slot
-                folder.mkdir(exist_ok=True)
-                collision = read_donor_member(donor, course.scene_package, b"col.col")
-                route = read_donor_member(donor, course.route_package, f"{course.donor_prefix}.aid".encode("ascii"))
-                route = convert_route(route, course.route_counts)
-                track = track_package(original_track, collision, route)
-                scene_sector, scene_entries, _ = course.scene_package
-                geometry, _ = make_overlay(original_dma, donor, donor_sector=scene_sector, donor_prefix=course.donor_prefix,
-                                           donor_members_count=scene_entries)
-                (folder / "TRACK.JPK").write_bytes(track)
-                (folder / "DMA1.JPK").write_bytes(geometry)
-                if course == ROAD_AMERICA:
-                    rain = output / "rain"
-                    rain.mkdir()
-                    rain_track = read_exact(reference, RAIN_TRACK_SECTOR * SECTOR_SIZE, RAIN_TRACK_BYTES)
-                    rain_dma = read_exact(reference, RAIN_DMA_SECTOR * SECTOR_SIZE, RAIN_DMA_BYTES)
-                    rain_geometry, _ = make_overlay(rain_dma, donor, donor_sector=ROAD_AMERICA_RAIN_DONOR_SECTOR,
-                                                   donor_members_count=scene_entries, reference_members=("sky.dma",))
-                    (rain / "TRACK.JPK").write_bytes(track_package(rain_track, collision, route))
-                    (rain / "DMA1.JPK").write_bytes(rain_geometry)
-            output.rename(args.output)
+        build_pack(args.reference_disc, args.donor_disc, args.output, courses,
+                   args.road_america_sunny_scene, args.road_america_rain_scene)
     except (OSError, ValueError, IndexError, KeyError, StopIteration, struct.error) as error:
         parser.exit(1, f"Road America setup failed: {error}\n")
     print(f"Road America add-on prepared at {args.output}")

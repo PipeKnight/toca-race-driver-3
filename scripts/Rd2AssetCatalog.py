@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Discover indexed car and circuit packages on a supported RD2 PS2 disc."""
+"""Discover indexed car and circuit packages on a Race Driver 2 PS2 disc."""
 
 import argparse
 from dataclasses import dataclass
@@ -9,7 +9,7 @@ from pathlib import Path
 import re
 import struct
 
-from BuildTrackCollisionOverlay import BIGF_ENTRY, DONOR_DIRECTORY_HASH, SECTOR_SIZE, verify_directory
+from BuildTrackCollisionOverlay import BIGF_ENTRY, DONOR_DIRECTORY_HASH, SECTOR_SIZE
 
 
 CHUNK_BYTES = 8 * 1024 * 1024
@@ -23,13 +23,14 @@ class AssetPackage:
     sector: int
     size: int
     entries: tuple[tuple[str, int, int], ...]
+    archive_name: str | None = None
 
     @property
     def names(self):
         return tuple(name for name, _, _ in self.entries)
 
     def path(self, disc):
-        return disc / f"RD2_{self.hug}.HUG"
+        return disc / (self.archive_name or f"RD2_{self.hug}.HUG")
 
     def read(self, disc):
         with self.path(disc).open("rb") as stream:
@@ -51,7 +52,7 @@ class AssetPackage:
         raise ValueError(f"Missing donor member {key!r} in HUG {self.hug}, sector {self.sector}")
 
 
-def read_index(stream, offset, limit, hug):
+def read_index(stream, offset, limit, hug, archive_name=None):
     if offset + HEADER_BYTES > limit:
         return None
     stream.seek(offset)
@@ -76,13 +77,20 @@ def read_index(stream, offset, limit, hug):
         entries[key] = (base + relative, length)
         extent = max(extent, finish)
     return AssetPackage(hug, offset // SECTOR_SIZE, extent,
-                        tuple((name, *entries[name]) for name in sorted(entries)))
+                        tuple((name, *entries[name]) for name in sorted(entries)), archive_name)
 
 
 def scan_disc(disc):
-    verify_directory(disc / "RD2.DIR", DONOR_DIRECTORY_HASH)
-    for hug in range(3):
-        path = disc / f"RD2_{hug}.HUG"
+    directory = disc / "RD2.DIR"
+    if not directory.is_file():
+        raise ValueError(f"Missing {directory}. Pass the mounted or extracted Race Driver 2 PS2 disc root")
+    archives = sorted(path for path in disc.iterdir()
+                      if re.fullmatch(r"RD2_[0-9]+\.HUG", path.name, re.IGNORECASE) and path.is_file())
+    if not archives:
+        raise ValueError(f"No numbered RD2_*.HUG archives found in {disc}")
+    found = False
+    for path in archives:
+        hug = int(path.stem.split("_")[-1])
         limit = path.stat().st_size
         with path.open("rb") as stream, path.open("rb") as index:
             start = 0
@@ -90,10 +98,13 @@ def scan_disc(disc):
                 for match in re.finditer(b"BIGF", chunk):
                     offset = start + match.start()
                     if offset % SECTOR_SIZE == 0:
-                        package = read_index(index, offset, limit, hug)
+                        package = read_index(index, offset, limit, hug, path.name)
                         if package:
+                            found = True
                             yield package
                 start += len(chunk)
+    if not found:
+        raise ValueError(f"No compatible sector-aligned PS2 BIGF packages found in {disc}")
 
 
 def car_packages(packages):
@@ -114,6 +125,22 @@ def circuits(packages):
     return {name: layout for name, layout in sorted(layouts.items()) if layout["scenes"]}
 
 
+def choose_route(disc, code, packages, scene):
+    if not packages:
+        raise ValueError(f"No race route was found for {code}")
+    candidates = {}
+    scene_rules = {name for name in scene.names if name.endswith(".red")}
+    for package in packages:
+        route = package.member(disc, f"{code}.aid")
+        score = len(scene_rules.intersection(package.names))
+        candidates[route] = max(candidates.get(route, 0), score)
+    maximum = max(candidates.values())
+    matches = [route for route, value in candidates.items() if value == maximum]
+    if len(matches) != 1:
+        raise ValueError(f"{code} has {len(matches)} different routes matching this scene; pairing needs verification")
+    return matches[0]
+
+
 def package_details(package):
     return {"hug": package.hug, "sector": package.sector, "bytes": package.size, "members": len(package.names)}
 
@@ -124,8 +151,10 @@ def main():
     args = parser.parse_args()
     try:
         packages = tuple(scan_disc(args.disc))
+        directory_hash = hashlib.sha256((args.disc / "RD2.DIR").read_bytes()).hexdigest()
         report = {
-            "directory_sha256": hashlib.sha256((args.disc / "RD2.DIR").read_bytes()).hexdigest(),
+            "directory_sha256": directory_hash,
+            "reference_directory": directory_hash == DONOR_DIRECTORY_HASH,
             "car_classes": [package_details(package) for package in car_packages(packages)],
             "circuits": {
                 name: {key: [package_details(package) for package in packages] for key, packages in layout.items()}

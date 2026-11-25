@@ -1,6 +1,6 @@
 # Import cars from Race Driver 2
 
-`scripts/ImportRd2Car.py` is a front end for local PS2 disc data. It separates discovery and model conversion from the final playable preset. It uses the reference Race Driver 2 `SLES-52638` v1.02 and TOCA Race Driver 3 `SLUS-21182` v1.02 disc directories. Use Python 3.10 or later.
+`scripts/ImportRd2Car.py` is a front end for local PS2 disc data. Use Python 3.10 or later and TOCA Race Driver 3 `SLUS-21182` v1.02 as the conversion target. Automatic catalog and conversion look up RD2 vehicle packages by their contents and can work with other PS2 donor revisions that use the same formats. An explicit `--class-range` from the catalog is checked against the archive bounds and package layout. The named `vintage` sector range and playable DB5 preset require the reference Race Driver 2 disc `SLES-52638` v1.02.
 
 ```powershell
 python scripts/ImportRd2Car.py list

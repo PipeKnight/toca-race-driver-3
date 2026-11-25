@@ -14,48 +14,15 @@ from tempfile import TemporaryDirectory
 from BuildDtmVariant import read_disc_range
 from BuildRoadAmericaMod import (
     A1_RING, ROAD_AMERICA, EVENT_CATALOG_BYTES, EVENT_CATALOG_SECTOR, TRACK_CATALOG_BYTES,
-    TRACK_CATALOG_SECTOR, TrackEntry, convert_route, event_catalog, read_bigf, track_catalog, track_package,
+    TRACK_CATALOG_SECTOR, TrackEntry, circuit_payloads, convert_route, event_catalog, read_bigf, track_catalog,
 )
 from BuildTrackCollisionOverlay import REFERENCE_DIRECTORY_HASH, TRACK_BYTES, TRACK_SECTOR, verify_directory
-from BuildTrackGeometryOverlay import DMA_BYTES, DMA_SECTOR, make_overlay
+from BuildTrackGeometryOverlay import DMA_BYTES, DMA_SECTOR
 from BuildTrackMapIcons import build_icons
 from ModAssets import find_member
 from Ps2TrackCollision import Collision, GRID_CELLS, GRID_SIDE, MAX_XZ, neighbors
 from Ps2TrackRoute import PIT_STALL_COUNT, read_route
-from Rd2AssetCatalog import circuits, scan_disc
-
-
-def route_counts(source):
-    if len(source) < 12 or source[:6] != bytes.fromhex("060d01200005"):
-        raise ValueError("Unsupported RD2 closed-circuit AID header")
-    main, = struct.unpack_from("<H", source, 6)
-    pit_at = 12 + main * 48
-    if not main or pit_at + 8 > len(source):
-        raise ValueError("Truncated RD2 main route")
-    pit_kind, pit_lanes, pit = struct.unpack_from("<BBH", source, pit_at)
-    aux_at = pit_at + 8 + pit * 32
-    if (pit_kind, pit_lanes) != (1, 3) or not pit or aux_at + 8 > len(source):
-        raise ValueError("Unsupported or truncated RD2 pit route")
-    aux_kind, aux_lanes, auxiliary = struct.unpack_from("<BBH", source, aux_at)
-    if (aux_kind, aux_lanes) != (2, 2) or not auxiliary or aux_at + 8 + auxiliary * 24 > len(source):
-        raise ValueError("Unsupported or truncated RD2 grid route")
-    return main, pit, auxiliary
-
-
-def choose_route(disc, code, packages, scene):
-    if not packages:
-        raise ValueError(f"No race route was found for {code}")
-    candidates = {}
-    scene_rules = {name for name in scene.names if name.endswith(".red")}
-    for package in packages:
-        route = package.member(disc, f"{code}.aid")
-        score = len(scene_rules.intersection(package.names))
-        candidates[route] = max(candidates.get(route, 0), score)
-    maximum = max(candidates.values())
-    matches = [route for route, value in candidates.items() if value == maximum]
-    if len(matches) != 1:
-        raise ValueError(f"{code} has {len(matches)} different routes matching this scene; pairing needs verification")
-    return matches[0]
+from Rd2AssetCatalog import choose_route, circuits, scan_disc
 
 
 def describe_slot(disc, code, route, name=None):
@@ -96,20 +63,17 @@ def build(donor, reference, layout, code, scene_number, output, name=None):
         raise ValueError(f"Scene number for {code} must be between 1 and {len(choices)}")
     scene = choices[index - 1]
     aid = choose_route(donor, code, layout["routes"], scene)
-    route = convert_route(aid, route_counts(aid))
+    route = convert_route(aid)
     catalog, entry = describe_slot(reference, code, route, name)
     original = read_disc_range(reference, 1, TRACK_SECTOR, TRACK_BYTES)
     original_scene = read_disc_range(reference, 1, DMA_SECTOR, DMA_BYTES)
-    collision = scene.member(donor, "col.col")
-    with scene.path(donor).open("rb") as stream:
-        geometry, _ = make_overlay(original_scene, stream, donor_sector=scene.sector,
-                                   donor_prefix=code, donor_members_count=len(scene.entries))
+    payloads = circuit_payloads(donor, scene, code, original, original_scene, route)
     events = read_disc_range(reference, 1, EVENT_CATALOG_SECTOR, EVENT_CATALOG_BYTES)
     with TemporaryDirectory(dir=output.parent) as stage:
         pack = Path(stage) / "circuit"
         pack.mkdir()
-        (pack / "TRACK.JPK").write_bytes(track_package(original, collision, route))
-        (pack / "DMA1.JPK").write_bytes(geometry)
+        for filename, data in payloads.items():
+            (pack / filename).write_bytes(data)
         (pack / "tracks.big").write_bytes(track_catalog(catalog, (entry,)))
         # Only one donor scene was selected, so register one weather choice for it.
         (pack / "events.big").write_bytes(event_catalog(events, (entry,), add_oschersleben=True,

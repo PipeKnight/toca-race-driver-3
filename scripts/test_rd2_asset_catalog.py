@@ -1,13 +1,15 @@
 """Exercise RD2 archive discovery and route validation without a retail disc."""
 
 from io import BytesIO
+from pathlib import Path
 import struct
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 import unittest
 
-from BuildRoadAmericaMod import convert_pit, convert_route, pit_distances
-from ImportRd2Track import check_ground, check_ground_segments, route_counts
-from Rd2AssetCatalog import BIGF_ENTRY, HEADER, HEADER_BYTES, SECTOR_SIZE, read_index
+from BuildRoadAmericaMod import convert_pit, convert_route, pit_distances, road_america_weather, route_counts
+from ImportRd2Track import check_ground, check_ground_segments
+from Rd2AssetCatalog import BIGF_ENTRY, HEADER, HEADER_BYTES, SECTOR_SIZE, read_index, scan_disc
 from Ps2TrackCollision import GRID_CELLS
 from Ps2TrackRoute import PIT_STALL_COUNT, read_route
 
@@ -20,6 +22,26 @@ def archive(names):
 
 
 class Rd2AssetCatalogTests(unittest.TestCase):
+    def test_disc_scan_finds_relocated_package_with_an_unknown_directory(self):
+        with TemporaryDirectory() as parent:
+            disc = Path(parent)
+            (disc / "RD2.DIR").write_bytes(bytes(16))
+            archive_path = disc / "RD2_2.HUG"
+            archive_path.write_bytes(bytes(3 * SECTOR_SIZE) + archive((b"COL.COL", b"ROA_TRK.DMA")))
+            package, = scan_disc(disc)
+            self.assertEqual((package.hug, package.sector), (2, 4))
+            self.assertEqual(package.member(disc, "ROA_TRK.DMA"), b"?")
+
+    def test_unknown_roa_weather_requires_selection_when_multiple_scenes_exist(self):
+        data = archive((b"roa_trk.dma", b"col.col"))
+        sunny = read_index(BytesIO(data), SECTOR_SIZE, len(data), 2)
+        rain = read_index(BytesIO(data), SECTOR_SIZE, len(data), 1)
+        with self.assertRaisesRegex(ValueError, "Could not identify a sunny Road America scene"):
+            road_america_weather(None, (rain, sunny))
+        self.assertEqual(road_america_weather(None, (rain, sunny), 2, 1), (sunny, rain))
+        with self.assertRaisesRegex(ValueError, "Choose different Road America scenes"):
+            road_america_weather(None, (rain, sunny), 2, 2)
+
     def test_index_resolves_members_relative_to_data_base(self):
         data = archive((b"COL.COL", b"ADE.AID"))
         package = read_index(BytesIO(data), SECTOR_SIZE, len(data), 1)

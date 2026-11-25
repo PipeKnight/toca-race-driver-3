@@ -6,7 +6,7 @@ The authoring tool uses a local Foundry Oval pack as a base. It retains the orig
 
 ## Build and run Tsukuba
 
-Use Python 3.10 or later, Race Driver 2 `SLES-52638` v1.02, and TOCA Race Driver 3 `SLUS-21182` v1.02. The fifth circuit slot and generated selection icons are available in Windows `v0.1.0-preview.8`. A developer runner built with the current source manifest can also launch the pack with `--road-america`. [Windows preview instructions](windows-preview.md)
+Use Python 3.10 or later and TOCA Race Driver 3 `SLUS-21182` v1.02. The reference workflow uses Race Driver 2 `SLES-52638` v1.02. The base circuit importer can also discover compatible assets on other RD2 PS2 discs. The fifth circuit slot and generated selection icons are available in Windows `v0.1.0-preview.8`. [Windows preview instructions](windows-preview.md) · [RD2 donor selection](race-driver-2-import.md#convert-road-america-and-a1-ring)
 
 Run these commands from the repository root. Set `$rd2` and `$rd3` to mounted or extracted disc directories containing their `.DIR` and `.HUG` files; the launcher itself can use an RD3 ISO. Use a new directory for each build output.
 

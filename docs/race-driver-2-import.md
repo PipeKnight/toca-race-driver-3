@@ -1,10 +1,10 @@
 # Import from Race Driver 2 on PS2
 
-Use your own PS2 copies of Race Driver 2 `SLES-52638` v1.02 and TOCA Race Driver 3 `SLUS-21182` v1.02. This guide covers Road America and both A1-Ring layouts through a verified circuit importer. The playable car example fits a DB5 roof strip and copies the donor's body texture pages onto the QA Touring test variant. The model converter also prepares all five DB5 detail levels for development builds.
+Use your own PS2 discs. The verified donor is Race Driver 2 `SLES-52638` v1.02 and the target is TOCA Race Driver 3 `SLUS-21182` v1.02. The automatic circuit and development vehicle importers can locate compatible packages on other RD2 revisions with the same archive formats. Verify each new revision in game. The playable DB5 preset still uses the verified donor revision.
 
 ## Convert Road America and A1-Ring
 
-Use Windows preview 6 or later and Python 3.10 or later. Run the commands from the repository root. Set `$rd2` to the mounted or extracted Race Driver 2 disc directory containing `RD2.DIR` and `RD2_1.HUG`. Set `$rd3` to the mounted or extracted TOCA Race Driver 3 disc directory containing `RDH.DIR` and `RDH_1.HUG`. The launcher can use the RD3 ISO directly. The builder needs a new output directory under an existing parent and verifies both disc-directory hashes.
+Use Windows preview 6 or later and Python 3.10 or later. Run the commands from the repository root. Set `$rd2` to the mounted or extracted Race Driver 2 disc directory containing `RD2.DIR` and the numbered `RD2_*.HUG` archives. Set `$rd3` to the mounted or extracted TOCA Race Driver 3 disc directory containing `RDH.DIR` and `RDH_1.HUG`. The launcher can use the RD3 ISO directly. The builder needs a new output directory under an existing parent. It checks the RD3 directory hash and discovers RD2 packages by their indexed members and format.
 
 ```powershell
 $rd2 = 'F:\'
@@ -18,7 +18,9 @@ python scripts/BuildRoadAmericaMod.py $rd3 $rd2 $pack --include-a1-ring
 & $launcher --disc $rd3Iso --road-america $pack --data-dir "$work\player"
 ```
 
-In **Free Race**, choose **Autosport Clio Cup**. Select **Road America** in Sunny or Rain, or choose **A1-Ring GP** or **A1-Ring Short** in Sunny. The same imports can be used in Time Trial. To build the Road America pack on its own, omit `--include-a1-ring`. Use the same data directory on a second launch to reload the add-on memory card.
+In **Free Race**, choose **Autosport Clio Cup**. Select **Road America** in Sunny or Rain when available, or choose **A1-Ring GP** or **A1-Ring Short** in Sunny. The same imports can be used in Time Trial. To build the Road America pack on its own, omit `--include-a1-ring`. Use the same data directory on a second launch to reload the add-on memory card.
+
+The two verified Road America sky assets identify the sunny and wet scenes even when their sector order changes. For other variants, run `python scripts/ImportRd2Track.py catalog --rd2-disc $rd2` and use the printed one-based scene numbers with `--road-america-sunny-scene` and `--road-america-rain-scene`. A pack without a selected or recognized wet scene offers Sunny. If a layout has several incompatible or ambiguous variants, use the [standalone builder](#discover-and-build-a-standalone-rd2-layout) to choose one scene and audit its route.
 
 | Circuit | Donor ID | Add-on resources |
 | --- | --- | --- |
@@ -28,7 +30,7 @@ In **Free Race**, choose **Autosport Clio Cup**. Select **Road America** in Sunn
 
 The importer puts the donor `col.col` and the converted `AILD` v9 route into `TRACK.JPK`. It rebuilds the donor's PS2 scene-node tree into the RD3 layout and writes it to `DMA1.JPK`. Keep both packages together with the pack's `tracks.big` and `events.big`. The imports use some companion resources from Oschersleben, including the A1-Ring loading screens. The Windows tests finished races and restored separate Time Trial records for the three circuits. [Circuit conversion and verification](ps2-disc-and-archives.md#add-a1-ring-gp-and-short)
 
-For another RD2 circuit, start by locating the donor scene and collision package and the matching `.aid` route package. Read the `Course` entries in `scripts/BuildRoadAmericaMod.py` for the required inputs. Record the sector, entry count, and byte size of each selected member, then verify its route section counts and check that its converted scene and track fit the target slots. Give the circuit its own track ID, record index, and event-calendar entry. The current command targets the three circuits listed above. [Track authoring and validation](modding.md#tracks)
+For another RD2 circuit, use the [standalone builder](#discover-and-build-a-standalone-rd2-layout). It identifies the scene, collision, and `.aid` route, then checks their formats and whether the converted data fits the target slots. [Track authoring and validation](modding.md#tracks)
 
 ## Extract and preview the Aston Martin DB5
 
@@ -241,7 +243,9 @@ The optional `--donor-effects` flag adds three private player banks for ignition
 Do not enable this option when checking stock audio parity. The matched stock Mercedes Time Trial with the three private entries had identical sampled images and a PCM difference about 44 dB below the full signal over seconds 8–26. A size-matched padding control without the extra entries reproduced the original PCM exactly, so archive size alone does not explain the difference. The default preset keeps the sector-aligned four-member archive.
 ## Discover and build a standalone RD2 layout
 
-The catalog scans sector-aligned BIGF directories on `SLES-52638` v1.02. It lists model classes and circuit IDs with their collision scenes and candidate race routes. The JSON report can be saved and inspected separately. The supported disc's 67 scenes across 54 IDs passed route pairing and structural conversion.
+The catalog scans sector-aligned PS2 BIGF directories and validates member names, offsets, and lengths. It lists model classes and circuit IDs with their collision scenes and candidate race routes. Its JSON report includes the RD2 directory hash for identification, along with whether it matches the reference. On `SLES-52638` v1.02, 67 scenes across 54 IDs passed route pairing and structural conversion. With another revision, save the catalog output and the `BOOT2` and `VER` lines from `SYSTEM.CNF` when reporting a compatibility result.
+
+A local regression used reference RD2 packages relocated to a different HUG, a changed directory checksum, and reversed Sunny and Rain scene order. The multi-course builder reproduced all ten original output files byte for byte. Automatic `vc_2` discovery reproduced all six DB5 development-bundle files. The relocated fixture checks archive placement. Additional regional PS2 discs still need separate in-game coverage.
 
 ```powershell
 python scripts/Rd2AssetCatalog.py F:\
