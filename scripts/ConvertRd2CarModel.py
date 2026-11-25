@@ -18,6 +18,7 @@ DMA_REF = 3
 RD3_VU_BANKS = {42: 176, 369: 458, 696: 740}
 RD2_VU_BANK_END = 326
 RD3_VU_BANK_END = 281
+RD3_TRIPLE_PASS_STRIP_SIZE = 24
 
 
 def align16(offset):
@@ -69,7 +70,53 @@ def translate_vu_banks(mesh):
     return bytes(output)
 
 
-def convert_mesh(mesh, model, sections, high_base, class_base):
+def split_triple_pass_strip(mesh, start, commands):
+    bank, material, uv, count, normal, third, second, tail = struct.unpack_from("<8I", mesh, start + 4)
+    if (material - bank, uv - bank, third - bank, second - bank, tail) != (2, 9, 6 * count + 15, 3 * count + 12, 0):
+        return ()
+    # The final GIF strip uses three qwords per vertex. Keep it below the
+    # normal input stream at the end of an RD3 bank.
+    if third - bank + 3 * count <= RD3_VU_BANK_END - count:
+        return ()
+    if normal != bank + RD2_VU_BANK_END - count:
+        raise ValueError(f"Unexpected RD2 normal stream at {start:#x}")
+    attributes = {uv, uv + 2, normal}
+    parts = []
+    # Two shared vertices preserve every triangle. The even step keeps their
+    # winding and the attribute samples at the seam.
+    for first in range(0, count - 2, RD3_TRIPLE_PASS_STRIP_SIZE - 2):
+        size = min(RD3_TRIPLE_PASS_STRIP_SIZE, count - first)
+        new_normal = bank + RD2_VU_BANK_END - size
+        new_second, new_third = bank + 3 * size + 12, bank + 6 * size + 15
+        addresses = {second - 3: new_second - 3, third - 3: new_third - 3}
+        part = bytearray(struct.pack("<9I", STREAM_HEADER, bank, material, uv, size, new_normal,
+                                     new_third, new_second, tail))
+        for command in commands[1:]:
+            if command.operation == 0x6e:
+                continue
+            word = read_word(mesh, command.payload - 4)
+            data = mesh[command.payload:command.payload + command.size]
+            address = command.immediate & 0x3ff
+            if command.operation in (0x64, 0x74, 0x68, 0x78) and address in attributes:
+                if command.count != count or command.size not in (count * 8, count * 12):
+                    raise ValueError(f"Unexpected RD2 attribute upload at {command.payload - 4:#x}")
+                stride = command.size // count
+                data = data[first * stride:(first + size) * stride]
+                word = (word & ~0xff03ff) | (size << 16) | (new_normal if address == normal else address)
+            elif command.operation == 0x6c:
+                word = (word & ~0x3ff) | addresses.get(address, address)
+                data = bytearray(data)
+                for offset in range(0, len(data), 16):
+                    tag, regs = struct.unpack_from("<QQ", data, offset)
+                    if regs == 0x512 and tag & 0x7fff == count:
+                        struct.pack_into("<Q", data, offset, (tag & ~0x7fff) | size)
+            part.extend(struct.pack("<I", word))
+            part.extend(data)
+        parts.append(part)
+    return parts
+
+
+def convert_mesh(mesh, model, sections, high_base, class_base, *, native_vu_banks):
     size, base, relocations = relocation_table(mesh)
     _, packets = mesh_packets(mesh)
     ranges = lod_packet_ranges(model, sections, base, size, packets)
@@ -77,6 +124,7 @@ def convert_mesh(mesh, model, sections, high_base, class_base):
     output = bytearray()
     offsets = {}
     refs = []
+    counts = [len(group) for group in ranges]
     split = 0
     for lod, (start, end) in enumerate(sections):
         if lod == 1:
@@ -88,37 +136,44 @@ def convert_mesh(mesh, model, sections, high_base, class_base):
             first = address - base
             last = first + (control & 0xffff) * 16
             output_first = len(output)
-            cuts = []
+            cursor = first
             for packet in starts[bisect_left(starts, first):bisect_left(starts, last)]:
-                colors = []
+                commands = []
                 for command in vif_commands(mesh, packet, last):
-                    if command.operation == 0x6e:
-                        colors.append((command.payload - 4, command.payload + command.size))
+                    commands.append(command)
                     if command.operation in (0x14, 0x17):
                         break
+                else:
+                    raise ValueError(f"Missing RD2 VU call in mesh packet at {packet:#x}")
+                colors = [cmd for cmd in commands if cmd.operation == 0x6e]
                 if len(colors) != 1:
                     raise ValueError(f"Expected one RD2 color upload in mesh packet at {packet:#x}")
-                cuts.extend(colors)
-            # RD3's CPU-side mesh walker expects positions immediately after UVs.
-            cursor = first
-            for cut_first, cut_last in cuts:
-                output.extend(mesh[cursor:cut_first])
-                cursor = cut_last
+                output.extend(mesh[cursor:packet])
+                pieces = split_triple_pass_strip(mesh, packet, commands) if native_vu_banks else ()
+                cursor = command.payload
+                if pieces:
+                    counts[lod] += len(pieces) - 1
+                else:
+                    # RD3's CPU-side mesh walker expects positions immediately after UVs.
+                    color = colors[0]
+                    pieces = [mesh[packet:color.payload - 4] + mesh[color.payload + color.size:cursor]]
+                calls = []
+                for piece in pieces:
+                    output.extend(piece)
+                    calls.append(len(output) - 4)
+                if command.operation == 0x14:
+                    offsets[cursor - 4] = calls
             output.extend(mesh[cursor:last])
             output.extend(bytes(align16(len(output)) - len(output)))
-            for offset in relocations:
-                if first <= offset < last:
-                    removed = sum(b - a for a, b in cuts if b <= offset)
-                    offsets[offset] = output_first + offset - first - removed
             pointer = high_base + output_first if lod == 0 else class_base + output_first - split
             refs.append((tag, pointer, len(output) - output_first))
     if offsets.keys() != relocations.keys() or not 0 < split < len(output):
         raise ValueError("RD2 mesh relocation coverage does not match the model")
-    high_rows = {offsets[old]: kind for old, kind in relocations.items() if offsets[old] < split}
-    class_rows = {offsets[old] - split: kind for old, kind in relocations.items() if offsets[old] >= split}
+    high_rows = {offset: kind for old, kind in relocations.items() for offset in offsets[old] if offset < split}
+    class_rows = {offset - split: kind for old, kind in relocations.items() for offset in offsets[old] if offset >= split}
     high = serialize_relocations(output[:split], high_rows, high_base)
     low = serialize_relocations(output[split:], class_rows, class_base)
-    return high, low, refs, [len(part) for part in ranges]
+    return high, low, refs, counts
 
 
 def count_part_chains(model, base, section_end, part):
@@ -241,7 +296,7 @@ def convert_model(model, mesh, target, *, native_vu_banks=True):
     texture_base, high_base, class_base = struct.unpack_from("<3I", target, 0x2c)
     if not texture_base or not high_base or not class_base or high_base == class_base:
         raise ValueError("The RD3 template must provide separate class and high-detail files")
-    high, low, refs, counts = convert_mesh(mesh, model, sections, high_base, class_base)
+    high, low, refs, counts = convert_mesh(mesh, model, sections, high_base, class_base, native_vu_banks=native_vu_banks)
     if native_vu_banks:
         high, low = translate_vu_banks(high), translate_vu_banks(low)
     model, relocations = convert_draw_transforms(model, base, relocations, sections)
