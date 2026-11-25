@@ -57,14 +57,22 @@ def body_uploads(data):
             or relocations.get(header + 8) != 0 or not table + count * TEXTURE_ROW_SIZE <= upload_start < payload):
         raise ValueError("Invalid PS2 car texture table")
 
+    groups = {}
+    for record in range(table, table + count * TEXTURE_ROW_SIZE, TEXTURE_ROW_SIZE):
+        name = bytes(data[record + 0xec:record + TEXTURE_ROW_SIZE]).split(b"\0", 1)[0]
+        prefix, _, suffix = name.rpartition(b"_")
+        if prefix and suffix in BODY_PAGES:
+            groups.setdefault(prefix.lower(), []).append((suffix, record))
+    matches = [rows for rows in groups.values()
+               if len(rows) == len(BODY_PAGES) and {suffix for suffix, _ in rows} == BODY_PAGES]
+    if len(matches) != 1:
+        raise ValueError("Expected one group of four numbered car body pages")
+
     pages = {}
     last = upload_start
-    for record in range(table, table + len(BODY_PAGES) * TEXTURE_ROW_SIZE, TEXTURE_ROW_SIZE):
-        name = bytes(data[record + 0xec:record + TEXTURE_ROW_SIZE]).split(b"\0", 1)[0]
-        suffix = name[-2:]
+    for suffix, record in matches[0]:
         tex0 = struct.unpack_from("<Q", data, record)[0]
-        if (suffix not in BODY_PAGES or name[-3:-2] != b"_" or suffix in pages
-                or tex0 >> 20 & 0x3f != 0x13 or tex0 >> 51 & 0xf):
+        if tex0 >> 20 & 0x3f != 0x13 or tex0 >> 51 & 0xf:
             raise ValueError("Expected four distinct 8-bit body pages with 32-bit palettes")
         if relocations.get(record + 0xcc) != 0 or relocations.get(record + 0xe8) != 0:
             raise ValueError("Missing car texture or palette relocation")

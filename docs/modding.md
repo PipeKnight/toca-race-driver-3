@@ -114,6 +114,19 @@ On Windows 11 Direct3D 12 the experimental course reached frame 8350 from power-
 
 The importer can build a [three-course pack](ps2-disc-and-archives.md#add-a1-ring-gp-and-short) with Road America, A1-Ring GP, and A1-Ring Short in separate slots. To edit an A1-Ring member, copy the entire expanded pack and edit the files under `tqa2` or `tqa3`. Keep the two catalogs and all three resource pairs in the candidate. Both A1-Ring layouts have passed Free Race and Time Trial with autosave. The [local lap records](ps2-disc-and-archives.md#local-lap-records) for all three imports coexist in one profile.
 
+### Generate track-selection maps
+
+Build a Windows runner with the track select map patch from the source manifest. Use the extracted RD3 disc and an existing circuit pack.
+
+```powershell
+python scripts/BuildTrackMapIcons.py --disc $rd3 --pack $addon
+& $launcher --disc $rd3Iso --road-america $addon
+```
+
+The tool writes `TS_RCCUF.LZS` at the pack root. It draws a white outline, shadow, start/finish gap, and direction arrow from each race route, then appends the images to the Autosport Clio Cup map atlas. It preserves the nine existing stock map entries and adds the Oschersleben map for the added calendar round. Build the atlas again in a fresh pack when a route changes. The game reads it in the track selector. Course photos and loading screens use separate assets.
+
+The Windows Direct3D 12 test displayed the original Hockenheim map and the generated maps for all five custom tracks in the same Free Race carousel. The archive is assembled locally from disc data and stays with the user's pack.
+
 For a Road America edit that applies in both weather settings, edit the corresponding package member at the root and under `rain`. The root files supply Sunny, and the extra pair supplies Rain. Use a separate pack directory for the experiment. [Road America in Rain](ps2-disc-and-archives.md#road-america-in-rain)
 
 ### Add a new collision shape

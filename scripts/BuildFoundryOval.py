@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 from BuildRoadAmericaMod import TrackEntry, event_catalog, track_catalog
 from ModAssets import find_member, replace_member
-from Ps2TrackCollision import collision_append
+from Ps2TrackCollision import Collision, append_triangles, collision_append, read_triangles
 from Ps2TrackRoute import EVENT, MAGIC, POINT, SECTION, read_route
 from Ps2TrackScene import Scene, scene_append
 
@@ -133,8 +133,18 @@ def build_packages(track, dma, work, *, route=None, markings=False):
                                      obj=work / "markings.obj", root=root, leaf=leaf,
                                      rgb=(230, 230, 230), offset_y=0.027))
         finished = marked
+    collision_data = collision.read_bytes()
+    perimeter = work / "perimeter.obj"
+    if perimeter.is_file():
+        # Surface 9 is the vertical barrier material in the Road America template.
+        vertices, faces = read_triangles(perimeter)
+        collision_data = bytes(append_triangles(Collision(collision_data), vertices, faces, 9))
+        bounded = work / "bounded.dma"
+        scene_append(SimpleNamespace(command="scene-append", input=finished, output=bounded,
+                                     obj=perimeter, root=root, leaf=leaf, rgb=(125, 128, 130), offset_y=0))
+        finished = bounded
     track = replace_member(track, ["osc1.big", "osc1.ail"], route)
-    track = replace_member(track, ["col.col"], collision.read_bytes())
+    track = replace_member(track, ["col.col"], collision_data)
     return track, replace_member(dma, ["trk.dma"], finished.read_bytes())
 
 

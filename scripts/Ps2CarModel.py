@@ -83,11 +83,12 @@ def mesh_packets(data):
             raise ValueError(f"Missing VU execution command after mesh header at {start:#x}")
         if not count or len(positions) != 1 or len(normals) != 1 or len(texcoords) != 1:
             raise ValueError(f"Unrecognized position, normal, or UV layout at {start:#x}")
-        offset = positions[0]
-        points = data[offset:offset + count * VERTEX.size]
-        if not all(math.isfinite(value) for point in VERTEX.iter_unpack(points) for value in point):
-            raise ValueError(f"Non-finite position in mesh packet at {start:#x}")
-        streams.append(MeshPacket(offset, normals[0], texcoords[0], count, triangle_strip))
+        for label, offset, layout in (("position", positions[0], VERTEX), ("normal", normals[0], VERTEX),
+                                      ("texture coordinate", texcoords[0], UV)):
+            values = layout.iter_unpack(data[offset:offset + count * layout.size])
+            if not all(math.isfinite(value) for point in values for value in point):
+                raise ValueError(f"Non-finite {label} in mesh packet at {start:#x}")
+        streams.append(MeshPacket(positions[0], normals[0], texcoords[0], count, triangle_strip))
     if found_calls != rows.keys():
         raise ValueError("Mesh packet calls do not match the relocation table")
     return base, streams
@@ -163,12 +164,10 @@ def part_map_coverage(data, counts):
     return {"entries_per_lod": len(lods[0]), "lods": levels}
 
 
-def model_info(args):
-    data = args.model.read_bytes()
+def inspect_model(data, mesh, *, hi_mesh=None, part_map=None):
     payload, base, rows, sections = model_sections(data)
     starts = [start for start, _ in sections]
     hi_reference, mesh_reference = struct.unpack_from("<2I", data, 0x30)
-    mesh = args.mesh.read_bytes()
     mesh_base, streams = mesh_packets(mesh)
     if mesh_base != mesh_reference:
         raise ValueError("The mesh base does not match the model's mesh reference")
@@ -177,8 +176,7 @@ def model_info(args):
                 model_relocation_kinds=dict(sorted(Counter(rows.values()).items())),
                 mesh_base=f"{mesh_reference:#010x}", mesh_packets=len(streams),
                 mesh_positions=sum(packet.count for packet in streams), hi_mesh_reference=f"{hi_reference:#010x}")
-    if args.hi_mesh:
-        hi_mesh = args.hi_mesh.read_bytes()
+    if hi_mesh is not None:
         hi_base, hi_streams = mesh_packets(hi_mesh)
         if hi_base != hi_reference:
             raise ValueError("The high-detail mesh base does not match the model's high-detail reference")
@@ -187,12 +185,19 @@ def model_info(args):
         ranges = lod_packet_ranges(data, sections[:1], hi_reference, relocation_table(hi_mesh)[0], hi_streams) + ranges
     info["lod_packet_ranges"] = {}
     info["lod_part_counts"] = lod_part_counts(data, sections, base)
-    for lod, packets in enumerate(ranges, start=0 if args.hi_mesh else 1):
+    for lod, packets in enumerate(ranges, start=0 if hi_mesh is not None else 1):
         if len(packets) != read_word(data, starts[lod] + 0x34):
             raise ValueError(f"The traced packets do not match the model's LOD {lod} packet count")
         info["lod_packet_ranges"][lod] = {"first_packet": packets.start, "packet_count": len(packets)}
-    if args.part_map:
-        info["part_map"] = part_map_coverage(args.part_map.read_bytes(), info["lod_part_counts"])
+    if part_map is not None:
+        info["part_map"] = part_map_coverage(part_map, info["lod_part_counts"])
+    return info
+
+
+def model_info(args):
+    info = inspect_model(args.model.read_bytes(), args.mesh.read_bytes(),
+                         hi_mesh=args.hi_mesh.read_bytes() if args.hi_mesh else None,
+                         part_map=args.part_map.read_bytes() if args.part_map else None)
     print(json.dumps(info, indent=2))
 
 

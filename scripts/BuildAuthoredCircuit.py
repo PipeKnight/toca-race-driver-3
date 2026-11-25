@@ -12,9 +12,11 @@ from tempfile import TemporaryDirectory
 
 from BuildFoundryOval import build_packages, write_obj
 from BuildRoadAmericaMod import TrackEntry, event_catalog, track_catalog
-from Ps2TrackRoute import EVENT, MAGIC, POINT, SECTION, read_route
+from BuildTrackMapIcons import build_icons
+from Ps2TrackRoute import EVENT, MAGIC, PIT_STALL_COUNT, POINT, SECTION, read_route
 
 PIT_HALF_WIDTH = 3.4
+GRID_APPROACH_METRES = 176
 
 
 def unit(x, z):
@@ -71,9 +73,12 @@ class Circuit:
             raise ValueError("Use a printable ASCII circuit name of 1–48 characters")
         self.width = float(layout["road_width_m"])
         self.height = float(layout.get("height_m", 12))
+        self.perimeter_wall = float(layout.get("perimeter_wall_m", 0))
         self.sectors = tuple(map(float, layout.get("sectors", (1 / 3, 2 / 3))))
         if not 8 <= self.width <= 24 or not -100 <= self.height <= 500:
             raise ValueError("Road width must be 8–24 m and height must be -100–500 m")
+        if not 0 <= self.perimeter_wall <= 1.9:
+            raise ValueError("Perimeter wall height must be 0–1.9 m")
         if (len(self.sectors) != 2 or not 0.13 < self.sectors[0] < self.sectors[1] < 0.87
                 or self.sectors[1] - self.sectors[0] < 0.08):
             raise ValueError("Supply two separated sector fractions in driving order")
@@ -141,7 +146,7 @@ class Circuit:
         right = [self.offset(d, half) for d in self.stations]
         validate_ribbon(left, right, "The racing surface", closed=True)
         pit_stations = range(-85, 86, 5)
-        left = [self.offset(d, pit_offset(d, self.width) - PIT_HALF_WIDTH) for d in pit_stations]
+        left = [self.offset(d, pit_inner_edge(d, self.width)) for d in pit_stations]
         right = [self.offset(d, pit_offset(d, self.width) + PIT_HALF_WIDTH) for d in pit_stations]
         validate_ribbon(left, right, "The pit lane", closed=False)
 
@@ -150,41 +155,56 @@ def pit_offset(distance, width):
     return (width / 2 + 6) * min(1, (90 - abs(distance)) / 30)
 
 
+def pit_inner_edge(distance, width):
+    standard = pit_offset(distance, width) - PIT_HALF_WIDTH
+    # The entry gate needs to accept a car as it finishes moving across from the main road.
+    if -65 <= distance <= -50:
+        clearance = 0.4 + max(0, distance + 55) / 5
+    elif -50 < distance < -45:
+        clearance = 1.4 + (distance + 50) * 1.2 / 5
+    else:
+        return standard
+    return min(standard, width / 2 + clearance)
+
+
 def build_route(circuit):
     stations = circuit.stations
     count = len(stations)
     first, second = (round(frac * count) for frac in circuit.sectors)
     boundary = round(80 * count / circuit.length)
+    grid_approach = math.ceil(GRID_APPROACH_METRES * count / circuit.length)
     pit_approach = count - round(96 * count / circuit.length)
     pit_switch = count - round(88 * count / circuit.length)
-    if first < boundary + 2 or second > count - boundary - 2:
-        raise ValueError("Keep the timing splits outside the 80 m start/finish area")
+    if first < boundary + 2 or second > count - grid_approach - 2:
+        raise ValueError("Keep the timing splits outside the auxiliary start/finish route")
     markers = {
         0: (6, 255, 0), boundary: (13, 255, 0),
         (boundary + first) // 2: (10, 0, 0), first: (2, 255, 0),
         (first + second) // 2: (10, 1, 0), second: (2, 255, 1),
-        (second + count - boundary) // 2: (10, 2, 0), pit_approach: (1, 255, 0),
-        pit_switch: (3, 255, 1), count - boundary: (12, 255, 0),
+        (second + count - grid_approach) // 2: (10, 2, 0), pit_approach: (1, 255, 0),
+        pit_switch: (3, 255, 1), count - grid_approach: (12, 255, 0),
     }
     if len(markers) != 10:
         raise ValueError("Keep enough space between sector splits and the pit approach")
     main = [(d, 0., *markers.get(i, (0, 255, 0))) for i, d in enumerate(stations)]
-    pit = []
-    for i, d in enumerate(range(-90, 91, 5)):
-        # Place the pit-only gates on the offset lane, not on the racing surface at the merge.
-        slots = 9 <= i <= 27 and i % 2 == 1
-        code = {6: 5, 8: 14, 18: 6, 28: 15, 30: 11, 36: 3}.get(i, 3 if slots else 0)
-        stall = (i - 9) // 2 if slots else 255
-        pit.append((d, pit_offset(d, circuit.width), code, stall, int(slots)))
-        if slots:
-            # Pair each stall start with its end marker before the next 5 m station.
-            pit.append((d + 4, pit_offset(d + 4, circuit.width), 4, stall, 0))
-    auxiliary = [(d, 0., 0, 1, 0) for d in stations[-boundary:] + stations[:boundary + 1]]
+    pit_markers = {-55: (5, 255, 0), -50: (14, 255, 0), 0: (6, 255, 0),
+                   50: (15, 255, 0), 60: (11, 255, 0), 90: (3, 255, 0)}
+    # RD3 assigns teams any of the sixteen stall indices in a full field.
+    for stall in range(PIT_STALL_COUNT):
+        start = -47 + 6 * stall
+        pit_markers[start] = (3, stall, 1)
+        pit_markers[start + 4] = (4, stall, 0)
+    pit = [(d, pit_offset(d, circuit.width), *pit_markers.get(d, (0, 255, 0)))
+           for d in sorted(set(range(-90, 91, 5)) | pit_markers.keys())]
+    # The last car of a 20-car grid starts about 156 m before the finish line.
+    # Keep both placement lanes on the main road, including through bends.
+    auxiliary = [(d, 0., 0, 1, 0) for d in stations[-grid_approach:] + stations[:boundary + 1]]
     half = circuit.width / 2
     # The main route's outer lanes frame the drivable ribbon instead of collapsing onto its center.
     # The pit entry tests lanes 0 and 1 as the two edges of the corridor; lane 2 is its center.
     groups = ((main, (-half, -half * 0.46, half * 0.32, 0, half), 0x1f, 1),
-              (pit, (-PIT_HALF_WIDTH, PIT_HALF_WIDTH, 0, 2.8), 0x27, 0), (auxiliary, (0, 4.0), 3, 0))
+              (pit, (-PIT_HALF_WIDTH, PIT_HALF_WIDTH, 0, 2.8), 0x27, 0),
+              (auxiliary, (-half / 3, half / 3), 3, 0))
     headers, events, points = bytearray(), bytearray(), bytearray()
     for rows, offsets, mask, loop in groups:
         headers.extend(SECTION.pack(len(rows), mask, loop))
@@ -192,9 +212,10 @@ def build_route(circuit):
             dx, dz = circuit.direction(distance)
             lap_distance = circuit.length if loop and i == 0 else distance % circuit.length
             events.extend(EVENT.pack(dz, -dx, lap_distance, code, tag, argument, 0))
-        for offset in offsets:
+        for lane, offset in enumerate(offsets):
             for distance, lateral, *_ in rows:
-                points.extend(POINT.pack(*circuit.offset(distance, lateral + offset)))
+                edge = pit_inner_edge(distance, circuit.width) if mask == 0x27 and lane == 0 else lateral + offset
+                points.extend(POINT.pack(*circuit.offset(distance, edge)))
     route = MAGIC + headers + events + points
     read_route(route)
     return route
@@ -216,7 +237,7 @@ def build_geometry(circuit, work):
     road, road_faces = [], []
     ribbon(road, road_faces, circuit.stations, lambda d: (-half, half), closed=True)
     ribbon(road, road_faces, list(range(-85, 86, 5)),
-           lambda d: (pit_offset(d, circuit.width) - PIT_HALF_WIDTH, pit_offset(d, circuit.width) + PIT_HALF_WIDTH))
+           lambda d: (pit_inner_edge(d, circuit.width), pit_offset(d, circuit.width) + PIT_HALF_WIDTH))
     write_obj(work / "road.obj", road, road_faces)
 
     marks, mark_faces = [], []
@@ -238,6 +259,19 @@ def build_geometry(circuit, work):
     stride = cols + 1
     write_obj(work / "ground.obj", ground, ((i, i + 1, i + stride + 1, i + stride)
                                              for i in range(rows * stride) if i % stride != cols))
+    if circuit.perimeter_wall:
+        north = list(range(cols))
+        east = [row * stride + cols for row in range(rows)]
+        south = [rows * stride + col for col in range(cols, 0, -1)]
+        west = [row * stride for row in range(rows, 0, -1)]
+        perimeter = north + east + south + west
+        vertices = []
+        for i in perimeter:
+            x, y, z = ground[i]
+            vertices.extend(((x, y - 0.2, z), (x, y + circuit.perimeter_wall, z)))
+        quads = ((i, (i + 2) % len(vertices), (i + 3) % len(vertices), i + 1)
+                 for i in range(0, len(vertices), 2))
+        write_obj(work / "perimeter.obj", vertices, quads)
 
 
 def preview(circuit, work):
@@ -257,7 +291,7 @@ def preview(circuit, work):
     return route
 
 
-def build(circuit, source, output, work):
+def build(circuit, source, output, work, *, disc=None):
     # The generated pit lane uses positive (rightward) lateral offsets.
     entry = TrackEntry("tqa5", circuit.name, f"{circuit.length / 1000:.3f}", 54, pit_side="RIGHT")
     tracks = track_catalog((source / "tracks.big").read_bytes(), (entry,), existing=84)
@@ -276,6 +310,8 @@ def build(circuit, source, output, work):
     (pack / entry.slot).mkdir()
     (pack / entry.slot / "TRACK.JPK").write_bytes(track)
     (pack / entry.slot / "DMA1.JPK").write_bytes(dma)
+    if disc is not None:
+        (pack / "TS_RCCUF.LZS").write_bytes(build_icons(disc, pack))
     pack.rename(output)
 
 
@@ -287,6 +323,7 @@ def main():
         command.add_argument("layout", type=Path, help="circuit JSON file")
         if name == "build":
             command.add_argument("source", type=Path, help="four-course pack built with BuildFoundryOval.py")
+            command.add_argument("--disc", type=Path, help="RD3 disc directory for track selector icons")
         command.add_argument("output", type=Path, help="new directory under an existing parent")
     args = parser.parse_args()
     try:
@@ -301,7 +338,7 @@ def main():
                 preview(circuit, folder)
                 folder.rename(args.output.resolve())
             else:
-                build(circuit, args.source, args.output.resolve(), work)
+                build(circuit, args.source, args.output.resolve(), work, disc=args.disc)
     except (OSError, ValueError, TypeError, IndexError, KeyError, struct.error) as error:
         parser.exit(1, f"Circuit build failed: {error}\n")
     print(f"{circuit.name}: {circuit.length:.1f} m, {len(circuit.stations)} main stations -> {args.output}")

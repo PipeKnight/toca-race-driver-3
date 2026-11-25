@@ -1,0 +1,43 @@
+--- a/runtime/src/disc.cpp
++++ b/runtime/src/disc.cpp
+@@ -226,10 +226,13 @@
+ constexpr std::uint32_t dtm_variant_first_sector = 742000;
+ constexpr std::uint32_t dtm_variant_event_sector = 81008;
+ constexpr std::size_t dtm_variant_event_size = 0x1fe800;
++constexpr std::uint32_t db5_camera_sector = 67712;
++constexpr std::size_t db5_camera_size = 42755;
+ struct DtmVariant {
+     std::array<std::vector<std::uint8_t>, dtm_variant_files.size()> files;
+     std::array<std::uint32_t, dtm_variant_files.size()> sectors{};
+     std::vector<std::uint8_t> events;
++    std::vector<std::uint8_t> db5_cameras;
+     std::uint32_t event_archive_sector = 0;
+     bool db5_dials = false;
+     std::uint64_t previous_gauge_frame = 0;
+@@ -434,6 +437,14 @@
+         std::fprintf(stderr, "[dtm-mod] invalid DB5 shadow\n");
+         return false;
+     }
++    const auto camera_path = root / "globfil1.jpk";
++    const bool has_cameras = std::filesystem::exists(camera_path, file_error);
++    if (file_error || (has_cameras && (!has_type ||
++        !load_dtm_variant_file(camera_path, mod->db5_cameras, db5_camera_size, db5_camera_size) ||
++        !valid_dtm_package(mod->db5_cameras, 21)))) {
++        std::fprintf(stderr, "[dtm-mod] invalid DB5 camera archive\n");
++        return false;
++    }
+     constexpr std::string_view dial_version = "DB5DIALS 1\r\n";
+     const auto dial_path = root / "db5-dials.ini";
+     mod->db5_dials = std::filesystem::exists(dial_path, file_error);
+@@ -557,6 +568,11 @@
+         const auto &mod = *g_dtm_variant;
+         const auto events = std::uint64_t{mod.event_archive_sector + dtm_variant_event_sector} * kSector;
+         copy_overlay_range(start, out, got, events, mod.events);
++        if (!mod.db5_cameras.empty()) {
++            const auto cameras = std::uint64_t{mod.event_archive_sector + db5_camera_sector} * kSector;
++            if (copy_overlay_range(start, out, got, cameras, mod.db5_cameras))
++                std::fprintf(stderr, "[dtm-mod] loading globfil1.jpk\n");
++        }
+         for (std::size_t i = 0; i < mod.files.size(); ++i) {
+             if (mod.files[i].empty()) continue;
+             const auto offset = std::uint64_t{g_dtm_archive_sector + mod.sectors[i]} * kSector;

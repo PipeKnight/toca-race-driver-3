@@ -17,6 +17,7 @@ from BuildTrackCollisionOverlay import (
 from ConvertRd2Db5Cabin import convert_cabin
 from ConvertRd2Db5Cockpit import companion_atlas, convert_shell, convert_wipers, donor_atlas, embedded_atlas
 from ConvertRd2Db5Doors import paint_doors
+from ConvertRd2CarGlass import convert_windshield
 from ConvertRd2CarModel import convert_model, convert_textures
 from ModAssets import REFERENCE_PACKAGES, find_member, read_part_map, replace_member
 from Ps2CarModel import model_sections
@@ -190,6 +191,21 @@ def car_type_catalog(disc, mechanics):
     return repack_bigf(original, car_types, base, base, len(original))
 
 
+def build_exterior_camera_archive(rd3):
+    original = read_disc_range(rd3, 1, 67712, 42755)
+    cameras = member(original, "carcam.ini")
+    if re.search(rb"(?mi)^\[DB5\]", cameras):
+        raise ValueError("The RD3 camera catalog already contains a DB5 entry")
+    # Use the clear forward pose and put the reverse-facing eye ahead of the
+    # body so it can see traffic without clipping the imported geometry.
+    updated = cameras.rstrip(b"\r\n") + b"\r\n\r\n[DB5]\r\n\r\n"
+    for suffix in (b"", b"_HSS", b"_VSS"):
+        updated += (b"bon_y" + suffix + b"=1.900000\r\n" + b"bon_z" + suffix + b"=-0.850000\r\n"
+                    + b"bon_pitch" + suffix + b"=0.079000\r\n"
+                    + b"r_bon_y" + suffix + b"=2.700000\r\n" + b"r_bon_z" + suffix + b"=4.500000\r\n")
+    return replace_member(original, ["carcam.ini"], updated)
+
+
 def build(rd2, rd3, donor_sound=False, donor_cockpit=False, *, donor_effects=False):
     if donor_effects and not donor_sound:
         raise ValueError("DB5 donor effects require donor sound")
@@ -204,11 +220,14 @@ def build(rd2, rd3, donor_sound=False, donor_cockpit=False, *, donor_effects=Fal
     target = read_disc_range(rd3, *REFERENCE_PACKAGES["dtm-cars"])
     donor_model = member(donor_models, "db5.mdl")
     donor_mesh = member(donor_models, "db5.msh")
+    # Preserve the mesh layout validated with the DB5-specific door and glass conversions.
     model, high, low, part_map, _, _ = convert_model(
-        donor_model, donor_mesh, member(target, "DTM_C_Klasse.mdl"))
+        donor_model, donor_mesh, member(target, "DTM_C_Klasse.mdl"), native_vu_banks=False)
     verify_wheel_lods(model, part_map)
     high = paint_doors(model, high, part_map)
-    low = paint_doors(model, low, part_map, lods=(1, 2, 3))
+    low = paint_doors(model, low, part_map, (1, 2, 3))
+    high = convert_windshield(model, high, part_map, {0: 3})
+    low = convert_windshield(model, low, part_map, {1: 3, 2: 1, 3: 1})
     texture = convert_textures(member(donor_models, "vc_2.tex"), member(target, "dtmx_13.tex"))
     high_texture = convert_textures(
         member(donor_models, "vc_2_hi.tex"), read_disc_range(rd3, 2, 185648, 381204))
@@ -244,10 +263,10 @@ def build(rd2, rd3, donor_sound=False, donor_cockpit=False, *, donor_effects=Fal
     if replaced != 1 or read_part_map(part_map)[0][2] == 0xffffffff:
         raise ValueError("The DB5 cockpit exterior part is unavailable")
     if donor_cockpit:
-        # Keep the donor's right-hand seat and put the eye behind the restored wheel and rear mirror.
+        # Keep the right-hand seat and frame the road above the dash through the donor windscreen.
         interior = b"\r\n".join(line for line in donor_interior.splitlines()
                                 if line and not line.startswith((b"Netting=", b"DigitialDisplay="))) + b"\r\n"
-        camera = b"[Camera]\r\nAngle=-0.16\r\nZoom=1.03\r\nZ=-0.24\r\nY=1.50\r\nX=0.32\r\n"
+        camera = b"[Camera]\r\nAngle=-0.02\r\nZoom=0.87\r\nZ=0.23\r\nY=1.72\r\nX=0.32\r\n"
         interior, count = re.subn(rb"(?ms)^\[Camera\]\r\n.*?(?=^\[Shift\])", camera, interior)
         if count != 1:
             raise ValueError("Expected one DB5 interior camera section")
@@ -276,6 +295,7 @@ def build(rd2, rd3, donor_sound=False, donor_cockpit=False, *, donor_effects=Fal
         "QA_TOURING_HI.MSH": high,
         "events.big": events,
         "cartype.big": car_type_catalog(rd3, donor_mechanics),
+        "globfil1.jpk": build_exterior_camera_archive(rd3),
         "db5.shd": build_db5_shadow(donor_model),
     }
     if donor_sound:

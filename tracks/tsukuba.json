@@ -2,6 +2,7 @@
   "name": "Tsukuba Circuit",
   "length_m": 2045,
   "road_width_m": 12,
+  "perimeter_wall_m": 1.8,
   "sectors": [0.326, 0.695],
   "centerline": [
     [144, 904], [225, 688], [315, 452], [400, 229],

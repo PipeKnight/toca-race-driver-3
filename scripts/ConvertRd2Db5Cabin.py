@@ -105,14 +105,14 @@ def cabin_swatch(image, palette):
     return swatch
 
 
-def wheel_shape(image, palette, width, height):
-    def circle(angle, radius, z=0):
-        return math.cos(angle) * radius, math.sin(angle) * radius, z
+def wheel_shape(image, palette, radius):
+    def circle(angle, fraction, z=0):
+        return math.cos(angle) * fraction, math.sin(angle) * fraction, z
 
     result = Strips()
 
     def add(points, uv):
-        xyz = [(x * width, y * height, (z - y * .36) * width) for x, y, z in points]
+        xyz = [(x * radius, y * radius, z * radius) for x, y, z in points]
         result.add(xyz, (uv,) * len(xyz))
 
     rubber, alloy, hub = map(cabin_swatch(image, palette), (30, 115, 50))
@@ -242,10 +242,15 @@ def convert_cabin(interior_model, interior_mesh, donor_model, donor_mesh, target
 
     matrix, (donor_wheel,) = db5_draw_parts(donor_model, donor_mesh, {11: 1})[11]
     points = strip_positions(donor_mesh, donor_wheel)
-    width, height = (max(abs(point[axis]) for point in points) for axis in (0, 1))
-    wheel = wheel_shape(image, palette, width, height)
-    mount = bytearray(matrix)
-    struct.pack_into("<f", mount, 56, .10)
+    radius = max(abs(x) for x, _, _ in points)
+    bottom = min(points, key=lambda point: point[1])
+    top = max(points, key=lambda point: point[1])
+    tilt = math.atan2(top[2] - bottom[2], top[1] - bottom[1])
+    cosine, sine = math.cos(tilt), math.sin(tilt)
+    wheel = wheel_shape(image, palette, radius)
+    x, y, _ = struct.unpack_from("<3f", matrix, 48)
+    # Keep the rim in the animated node's XY plane. Its Z axis is the steering column.
+    mount = struct.pack("<16f", 1, 0, 0, 0, 0, cosine, sine, 0, 0, -sine, cosine, 0, x, y, .10, 1)
     cabin.append("steering_wheel", "int_main_body", mount, wheel.mesh, wheel.strips)
     dashboard(cabin, image, palette)
     return cabin.encode()

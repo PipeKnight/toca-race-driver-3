@@ -14,6 +14,10 @@ Use `PipeKnight <34810566+PipeKnight@users.noreply.github.com>` as the author an
 
 Ship future Windows releases as a single portable `.exe` with its setup files bundled. Players should be able to launch it directly without extracting a ZIP or installing it system-wide. Preserve the existing portable data and setup directory options.
 
+## Import acceptance
+
+Keep an individual Windows test record for every imported car, livery, circuit layout, and offered weather option. Run both the asset audit and the applicable in-game checks before marking an import verified. Record defects, untested cases, and the exact pack used for evidence. Apply the [import acceptance checklist](docs/acceptance-checklist.md#import-acceptance-by-asset) when reviewing a new import or changing shared conversion code.
+
 ## Six recommendations from the open letter
 
 1. **One entry point.** Ship one user-facing executable per platform and architecture. Have it handle first-run setup when needed and launch the game directly once setup is complete. Players and third-party launchers use the same executable. Internal helper processes and separate developer builds are permitted.

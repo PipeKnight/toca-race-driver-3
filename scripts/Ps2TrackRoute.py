@@ -13,6 +13,7 @@ SECTION = struct.Struct("<HBB")
 EVENT = struct.Struct("<3f4B")
 POINT = struct.Struct("<2f")
 LABELS = ("main", "pit", "auxiliary")
+PIT_STALL_COUNT = 16
 FIELDS = ("section", "station", "normal_x", "normal_z", "distance_m", "code", "tag", "argument", "reserved")
 
 

@@ -14,6 +14,7 @@ from BuildRoadAmericaMod import (
 )
 from BuildTrackCollisionOverlay import encode_lzss, encode_lzss_compact
 from BuildTrackGeometryOverlay import FOOTER, RELOCATION, VERTEX as SCENE_VERTEX, vif_commands
+from BuildTrackMapIcons import fit_selector_extent
 from ConvertRd2CarModel import convert_draw_transforms, convert_textures, serialize_relocations
 from ConvertRd2Db5Cockpit import embedded_atlas, replace_draw_strips
 from ModAssets import find_member, replace_member
@@ -27,6 +28,15 @@ from Ps2TrackScene import Scene, scene_append
 
 
 class ModAssetTests(unittest.TestCase):
+    def test_selector_padding_is_decoded_from_the_full_disc_extent(self):
+        archive = b"JPAK" + b"track maps" * 40
+        packed = encode_lzss(archive)
+        for extra in range(160, 169):
+            extent = len(packed) + extra
+            padded, expanded = fit_selector_extent(packed, archive, extent)
+            self.assertEqual(len(padded), extent)
+            self.assertEqual(unpack_lzss(padded, expanded), archive.ljust(expanded, b"\0"))
+
     def test_cockpit_replacement_rebuilds_the_first_strip_and_rotates_vu_buffers(self):
         word = struct.Struct("<I")
 

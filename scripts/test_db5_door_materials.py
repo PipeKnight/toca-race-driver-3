@@ -6,7 +6,7 @@ import unittest
 from unittest.mock import patch
 
 from BuildRd2Db5Variant import verify_wheel_lods
-from ConvertRd2Db5Doors import BODY_TEX0, UV, VERTEX, paint_doors, paint_normal, paint_uv
+from ConvertRd2Db5Doors import BODY_TEX0, UV, VERTEX, DoorStreams, paint_doors, paint_normal, paint_uv
 from Ps2CarModel import MeshPacket
 
 
@@ -40,16 +40,38 @@ class DoorPaintTests(unittest.TestCase):
                 VERTEX.pack_into(mesh, outer.position + i * 12, 0., float(i), 0.)
                 VERTEX.pack_into(mesh, outer.normal + i * 12, *normal)
                 UV.pack_into(mesh, outer.uv + i * 8, .25, .75)
-            groups.append(((offset, offset + 8, offset + 16), [inner], [outer]))
+            groups.append(DoorStreams([inner], [outer], [offset, offset + 8, offset + 16], (), None, None, []))
         with patch("ConvertRd2Db5Doors.door_streams", return_value=iter(groups)):
             repainted = paint_doors(b"", mesh, b"")
-        for side, (swaps, (inner,), (outer,)) in zip((-1, 1), groups, strict=True):
-            self.assertEqual(tuple(struct.unpack_from("<Q", repainted, at)[0] for at in swaps), BODY_TEX0)
+        for side, door in zip((-1, 1), groups, strict=True):
+            inner, = door.trim
+            outer, = door.paint
+            self.assertEqual(tuple(struct.unpack_from("<Q", repainted, at)[0] for at in door.trim_textures), BODY_TEX0)
             self.assertEqual(UV.unpack_from(repainted, inner.uv), (.25, .75))
             self.assertEqual(VERTEX.unpack_from(repainted, inner.normal), (side, 0., 0.))
             self.assertEqual(repainted[inner.position:inner.normal], mesh[inner.position:inner.normal])
             self.assertEqual(repainted[outer.position:outer.uv + 2 * UV.size],
                              mesh[outer.position:outer.uv + 2 * UV.size])
+
+    def test_class_doors_use_the_panel_texture_and_keep_the_reflection_packet_size(self):
+        mesh = bytearray(400)
+        groups = []
+        textures = (0x2007e085e131349c, 0x2007f085e1313a0e, 0x20000085e1310080)
+        for offset, side in ((0, -1), (200, 1)):
+            trim = MeshPacket(offset + 0x80, offset + 0x8c, offset + 0x98, 1, True)
+            paint = MeshPacket(offset + 0xa0, offset + 0xac, offset + 0xb8, 1, True)
+            VERTEX.pack_into(mesh, paint.normal, side, 0., 0.)
+            UV.pack_into(mesh, paint.uv, .5, .75)
+            mesh[offset + 32:offset + 64] = bytes(range(32))
+            struct.pack_into("<QQ", mesh, offset + 80, 0x312e400000008001, 0x512)
+            groups.append(DoorStreams([trim], [paint], [offset, offset + 8, offset + 16],
+                                      textures, offset + 96, offset + 32, [offset + 80]))
+        with patch("ConvertRd2Db5Doors.door_streams", return_value=iter(groups)):
+            actual = paint_doors(b"", mesh, b"", (1,))
+        for offset in (0, 200):
+            self.assertEqual(struct.unpack_from("<3Q", actual, offset), textures)
+            self.assertEqual(actual[offset + 96:offset + 128], mesh[offset + 32:offset + 64])
+            self.assertEqual(struct.unpack_from("<QQ", actual, offset + 80), (0x312e400000008001, 0xd12))
 
 
 class WheelLodTests(unittest.TestCase):

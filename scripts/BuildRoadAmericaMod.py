@@ -2,7 +2,9 @@
 """Prepare Road America and optional A1-Ring layouts from local PS2 discs."""
 
 import argparse
+from bisect import bisect_right
 from dataclasses import dataclass, field
+from itertools import accumulate, pairwise
 import math
 from pathlib import Path
 import re
@@ -17,6 +19,7 @@ from BuildTrackCollisionOverlay import (
     read_exact, verify_directory,
 )
 from BuildTrackGeometryOverlay import DMA_BYTES, DMA_SECTOR, make_overlay
+from Ps2TrackRoute import PIT_STALL_COUNT
 
 
 TRACK_CATALOG_SECTOR = 80673
@@ -106,7 +109,8 @@ def track_catalog(original, courses=(ROAD_AMERICA,), *, existing=80):
     return repack_bigf(original, members, base, max(base, 0x800), 0x4300)
 
 
-def event_catalog(original, courses=(ROAD_AMERICA,), *, existing_rounds=9, add_oschersleben=True):
+def event_catalog(original, courses=(ROAD_AMERICA,), *, existing_rounds=9, add_oschersleben=True,
+                  rainy_slots=(b"osc1", b"tqa1")):
     members, base = read_bigf(original, 204)
     event = members[b"rccuf.ini"]
     number = re.compile(rb"(?mi)^RacesNum([ \t]*=[ \t]*)(\d+)(?=[ \t]*\r?$)")
@@ -122,7 +126,7 @@ def event_catalog(original, courses=(ROAD_AMERICA,), *, existing_rounds=9, add_o
         body, replacements = re.subn(rb"(?mi)^(TrackID[ \t]*=[ \t]*)hoc3", rb"\g<1>" + track, source)
         if replacements != 1:
             raise ValueError("Unexpected Clio Cup track reference")
-        if track not in (b"osc1", b"tqa1"):
+        if track not in rainy_slots:
             body = re.sub(rb"(?mi)^Weather2[^\r\n]*\r?\n|^WeatherProb2[^\r\n]*\r?\n", b"", body)
             body = re.sub(rb"(?mi)^(WeatherProb1[ \t]*=[ \t]*)90", rb"\g<1>100", body)
         rounds.append(f"[Race {number_value}]\r\n".encode("ascii") + body)
@@ -143,6 +147,118 @@ def read_donor_member(donor, package, member):
         if name.rstrip(b"\0") == member and length == size:
             return read_exact(donor, start + base + relative, length)
     raise ValueError(f"Missing or unexpected donor member {member!r}")
+
+
+def expand_pit_stalls(lanes, rows, lap_length):
+    stalls = [i for i, (_, argument, code, _) in enumerate(rows) if code == 3 and argument]
+    if len(stalls) >= PIT_STALL_COUNT or not stalls:
+        return None
+    progress = tuple(accumulate((math.dist(a, b) for a, b in pairwise(lanes[3])), initial=0.))
+    exit_gate = next((i for i in range(stalls[-1] + 1, len(rows)) if rows[i][2] == 15), len(rows) - 1)
+    stop_length = 4.
+    first = progress[stalls[0]]
+    last = min(progress[stalls[-1]], progress[exit_gate] - stop_length)
+    spacing = (last - first) / (PIT_STALL_COUNT - 1)
+    if spacing < 6.:
+        return None  # Preserve the source stall intervals when there is too little room for sixteen cars.
+
+    markers = {}
+    for tag in range(PIT_STALL_COUNT):
+        start = first + spacing * tag
+        for at, code, argument in ((start, 3, 1), (start + stop_length, 4, 0)):
+            i = bisect_right(progress, at) - 1
+            if i == len(progress) - 1:
+                fraction = 0.
+            else:
+                gap = progress[i + 1] - progress[i]
+                fraction = (at - progress[i]) / gap
+                if fraction < 1e-6 and rows[i][2] not in (0, 3, 4):
+                    fraction = min(0.05 / gap, 0.5)
+            markers[i + fraction] = (tag, argument, code)
+
+    coordinates = tuple([] for _ in lanes)
+    events = []
+    for key in sorted(markers.keys() | set(range(len(rows)))):
+        i = int(key)
+        fraction = key - i
+        tag, argument, code, distance = rows[i]
+        if key in markers:
+            tag, argument, code = markers[key]
+        elif i in stalls or code == 4:
+            tag, argument, code = 255, 0, 0
+        else:
+            tag, argument = 255, 0
+        if fraction:
+            span = rows[i + 1][3] - distance
+            if span < 0 and lap_length > 0:
+                span += lap_length
+            distance += span * fraction
+            if lap_length > 0 and distance >= lap_length:
+                distance -= lap_length
+        events.append((tag, argument, code, distance))
+        for source, target in zip(lanes, coordinates, strict=True):
+            ax, az = source[i]
+            if fraction:
+                bx, bz = source[i + 1]
+                ax += (bx - ax) * fraction
+                az += (bz - az) * fraction
+            target.append((ax, az))
+    return coordinates, events
+
+
+def convert_pit(lanes, rows, lap_length):
+    left, right, stalls = lanes
+    # RD2's extra lane leads to the stalls. RD3 also needs a driving line
+    # between the entrance and exit corridor edges.
+    driving = [((ax + bx) / 2, (az + bz) / 2) for (ax, az), (bx, bz) in zip(left, right, strict=True)]
+    source = left, right, driving, stalls
+    expanded = expand_pit_stalls(source, rows, lap_length)
+    if expanded is not None:
+        return expanded
+    converted = tuple([] for _ in source)
+    events = []
+    for i, (tag, argument, code, distance) in enumerate(rows):
+        for before, after in zip(source, converted, strict=True):
+            after.append(before[i])
+        if code != 3 or argument == 0:
+            events.append((tag if code == 4 else 255, 0, code, distance))
+            continue
+
+        events.append((argument, 1, 3, distance))
+        if i + 1 == len(rows):
+            raise ValueError(f"Donor pit stall {argument} has no following station")
+        if rows[i + 1][2] == 4:
+            if rows[i + 1][0] != argument:
+                raise ValueError(f"Donor pit stall {argument} has a mismatched end marker")
+            continue
+        gap = rows[i + 1][3] - distance
+        if gap < 0 and lap_length > 0:
+            gap += lap_length
+        if not math.isfinite(gap) or gap <= 0:
+            raise ValueError(f"Donor pit stall {argument} has no usable stop interval")
+        length = min(6., gap / 2)
+        fraction = length / gap
+        end = distance + length
+        if lap_length > 0 and end >= lap_length:
+            end -= lap_length
+        events.append((argument, 0, 4, end))
+        for before, after in zip(source, converted, strict=True):
+            ax, az = before[i]
+            bx, bz = before[i + 1]
+            after.append((ax + (bx - ax) * fraction, az + (bz - az) * fraction))
+    return converted, events
+
+
+def pit_distances(lanes, events, lap_length):
+    finishes = [i for i, (_, _, code, _) in enumerate(events) if code == 6]
+    if len(finishes) != 1 or not math.isfinite(lap_length) or lap_length <= 0:
+        return events
+    # Rebuild the distance axis together with its lap wrap. The RD2 odometer
+    # can wrap at a different station from the physical pit finish gate.
+    distances = tuple(accumulate((max(.001, math.dist(a, b)) for a, b in pairwise(lanes[2])), initial=0.))
+    finish = distances[finishes[0]]
+    return [(tag, argument, code, (distance - finish) % lap_length)
+            for (tag, argument, code, _), distance in zip(events, distances, strict=True)]
 
 
 def convert_route(source, counts=ROAD_AMERICA.route_counts):
@@ -169,12 +285,19 @@ def convert_route(source, counts=ROAD_AMERICA.route_counts):
     if struct.unpack_from("<BBH", source, position) != (2, 2, aux_count):
         raise ValueError("Unexpected donor auxiliary route")
     auxiliary, aux_events, _ = section(position + 8, aux_count, 2)
-    sections = ((main, main_events, 0x1F, 1), (pit + [pit[2]], pit_events, 0x27, 0),
-                (auxiliary, aux_events, 3, 0))
-    first = next(i for i, row in enumerate(main_events) if row[2] == 12)
-    last = next(i for i, row in enumerate(main_events) if row[2] == 13)
+    starts = [i for i, row in enumerate(main_events) if row[2] == 12]
+    ends = [i for i, row in enumerate(main_events) if row[2] == 13]
+    if len(starts) != 1 or len(ends) != 1:
+        raise ValueError("Donor main route requires exactly one start and end marker for the grid route")
+    first, = starts
+    last, = ends
     if (last - first) % len(main_events) + 1 != len(aux_events):
         raise ValueError("Donor route checkpoints disagree")
+    lap_length = main_events[0][3]
+    pit, pit_events = convert_pit(pit, pit_events, lap_length)
+    pit_events = pit_distances(pit, pit_events, lap_length)
+    sections = ((main, main_events, 0x1F, 1), (pit, pit_events, 0x27, 0),
+                (auxiliary, aux_events, 3, 0))
 
     header = bytearray(b"AILD" + struct.pack("<I", 9))
     events = bytearray()
@@ -193,13 +316,7 @@ def convert_route(source, counts=ROAD_AMERICA.route_counts):
                 width = math.hypot(dx, dz)
             if not width or not math.isfinite(width) or not math.isfinite(distance):
                 raise ValueError("Invalid donor route coordinate")
-            if group == 0:
-                flags = (code, tag & 255, argument, 0)
-            elif group == 1:
-                pit_marker = code == 3 and argument != 0
-                flags = (code, argument if pit_marker else 255, int(pit_marker), 0)
-            else:
-                flags = (0, 1, 0, 0)
+            flags = (0, 1, 0, 0) if group == 2 else (code, tag & 255, argument, 0)
             events.extend(struct.pack("<3f4B", dx / width, dz / width, distance, *flags))
         for line in coordinates:
             for point in line:

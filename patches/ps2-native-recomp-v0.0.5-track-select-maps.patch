@@ -1,0 +1,63 @@
+--- a/runtime/src/disc.cpp
++++ b/runtime/src/disc.cpp
+@@ -68,10 +68,14 @@
+ constexpr unsigned road_america_rain = imported_track_ids.size() + 1;
+ constexpr std::array imported_track_folders{"", "tqa2", "tqa3", "tqa4", "tqa5"};
+ 
++constexpr std::uint32_t clio_track_select_sector = 130160;
++constexpr std::size_t clio_track_select_bytes = 504061;
++
+ struct RoadAmerica {
+     std::uint32_t archive_sector = 0;
+     unsigned courses = 1;
+     std::array<std::vector<std::uint8_t>, 2> catalogs;
++    std::vector<std::uint8_t> clio_track_select;
+     std::array<std::array<std::vector<std::uint8_t>, 2>, imported_track_ids.size()> packages;
+     std::array<std::vector<std::uint8_t>, road_america_rain_members.size()> rain;
+     // One selection per reference resource. Zero keeps the stock Oschersleben read.
+@@ -125,8 +129,33 @@
+             if (!load_track_overlay(resources, road_america_members[i + 2], mod->packages[course][i])) return false;
+         }
+     }
++    std::error_code error;
++    const auto selector_path = root / "TS_RCCUF.LZS";
++    const bool has_selector = std::filesystem::exists(selector_path, error);
++    if (error) {
++        std::fprintf(stderr, "[road-america] could not check the Clio Cup selector atlas\n");
++        return false;
++    }
++    if (has_selector) {
++        const auto filename = os::utf8(selector_path);
++        auto *file = os::open(filename, "rb");
++        if (!file) {
++            std::fprintf(stderr, "[road-america] could not open %s\n", filename.c_str());
++            return false;
++        }
++        auto &data = mod->clio_track_select;
++        data.resize(clio_track_select_bytes);
++        const auto size = std::fread(data.data(), 1, data.size(), file);
++        const bool complete = std::fgetc(file) == EOF && !std::ferror(file);
++        std::fclose(file);
++        if (size != data.size() || !complete || std::memcmp(data.data(), "LZSS", 4) != 0 ||
++            u32(data.data() + 4) != data.size() ||
++            u32(data.data() + 8) < 32 || u32(data.data() + 8) > (1u << 20)) {
++            std::fprintf(stderr, "[road-america] invalid Clio Cup selector archive %s\n", filename.c_str());
++            return false;
++        }
++    }
+     const auto rain_folder = root / "rain";
+-    std::error_code error;
+     const bool has_rain = std::filesystem::exists(rain_folder, error);
+     if (error) {
+         std::fprintf(stderr, "[road-america] could not check %s\n", os::utf8(rain_folder).c_str());
+@@ -589,6 +618,10 @@
+         const std::uint64_t offset = std::uint64_t{mod.archive_sector + road_america_members[i].sector} * kSector;
+         copy_overlay_range(start, out, got, offset, mod.catalogs[i]);
+     }
++    if (!mod.clio_track_select.empty()) {
++        const std::uint64_t offset = std::uint64_t{mod.archive_sector + clio_track_select_sector} * kSector;
++        copy_overlay_range(start, out, got, offset, mod.clio_track_select);
++    }
+     for (std::size_t i = 0; i < mod.selected.size(); ++i) {
+         const auto selected = mod.selected[i].load();
+         if (!selected) continue;

@@ -15,6 +15,9 @@ from Ps2CarModel import (
 PART_BYTES = 0x30
 RD3_PART_SLOTS = 320
 DMA_REF = 3
+RD3_VU_BANKS = {42: 176, 369: 458, 696: 740}
+RD2_VU_BANK_END = 326
+RD3_VU_BANK_END = 281
 
 
 def align16(offset):
@@ -24,6 +27,46 @@ def align16(offset):
 def serialize_relocations(payload, relocations, base):
     directory = b"".join(RELOCATION.pack(offset, kind) for offset, kind in relocations.items())
     return bytes(payload) + directory + FOOTER.pack(len(relocations), len(payload), base)
+
+
+def translate_vu_banks(mesh):
+    extent, _, _ = relocation_table(mesh)
+    output = bytearray(mesh)
+    for start in range(0, extent - 35, 4):
+        if read_word(mesh, start) != STREAM_HEADER:
+            continue
+        fields = struct.unpack_from("<8I", mesh, start + 4)
+        bank, _, _, count, normal, _, _, _ = fields
+        target = RD3_VU_BANKS.get(bank)
+        if target is None or normal != bank + RD2_VU_BANK_END - count:
+            raise ValueError(f"Unknown RD2 VU bank layout at {start:#x}")
+        normal_target = target + RD3_VU_BANK_END - count
+        for field, address in enumerate(fields):
+            if field == 3 or address == 0:
+                continue  # The count and unused pointers are independent of the VU bank.
+            relative = address - bank
+            if field != 4 and not 0 <= relative <= RD3_VU_BANK_END:
+                raise ValueError(f"RD2 VU header address outside its strip bank at {start:#x}")
+            struct.pack_into("<I", output, start + 4 * (field + 1),
+                             normal_target if field == 4 else target + relative)
+
+        for command in vif_commands(mesh, start, extent):
+            at = command.payload - 4
+            if command.operation in (0x14, 0x17):
+                # Match the RD3 MSCAL and MSCNT encoding. The address and relocation stay intact.
+                struct.pack_into("<I", output, at, read_word(mesh, at) & 0xff00ffff)
+                break
+            if at == start or command.operation & 0x60 != 0x60:
+                continue  # Upload the two header vectors at the fixed VU address zero.
+            address = command.immediate & 0x3ff
+            relative = address - bank
+            if not 0 <= relative <= RD2_VU_BANK_END:
+                raise ValueError(f"RD2 VIF upload outside its strip bank at {at:#x}")
+            translated = normal_target if address == normal else target + relative
+            if not target <= translated <= target + RD3_VU_BANK_END:
+                raise ValueError(f"RD2 VIF upload exceeds the RD3 strip bank at {at:#x}")
+            struct.pack_into("<I", output, at, (read_word(mesh, at) & ~0x3ff) | translated)
+    return bytes(output)
 
 
 def convert_mesh(mesh, model, sections, high_base, class_base):
@@ -191,7 +234,7 @@ def compact_rd2_model(model, base, sections, packet_counts):
     return output, spans, maps
 
 
-def convert_model(model, mesh, target):
+def convert_model(model, mesh, target, *, native_vu_banks=True):
     _, base, relocations, sections = model_sections(model)
     _, target_base, _, target_sections = model_sections(target)
     lod_part_counts(target, target_sections, target_base)
@@ -199,6 +242,8 @@ def convert_model(model, mesh, target):
     if not texture_base or not high_base or not class_base or high_base == class_base:
         raise ValueError("The RD3 template must provide separate class and high-detail files")
     high, low, refs, counts = convert_mesh(mesh, model, sections, high_base, class_base)
+    if native_vu_banks:
+        high, low = translate_vu_banks(high), translate_vu_banks(low)
     model, relocations = convert_draw_transforms(model, base, relocations, sections)
     output, spans, maps = compact_rd2_model(model, base, sections, counts)
 
