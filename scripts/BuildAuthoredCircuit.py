@@ -6,11 +6,10 @@ from bisect import bisect_right
 import json
 import math
 from pathlib import Path
-import shutil
 import struct
 from tempfile import TemporaryDirectory
 
-from BuildFoundryOval import build_packages, write_obj
+from BuildFoundryOval import build_packages, copy_circuit_files, write_obj
 from BuildRoadAmericaMod import TrackEntry, event_catalog, track_catalog
 from BuildTrackMapIcons import build_icons
 from Ps2TrackRoute import EVENT, MAGIC, PIT_STALL_COUNT, POINT, SECTION, read_route
@@ -301,10 +300,7 @@ def build(circuit, source, output, work, *, disc=None):
                                 work, route=route, markings=True)
     pack = work / "pack"
     for directory in ("", "tqa2", "tqa3", "tqa4") + (("rain",) if (source / "rain").is_dir() else ()):
-        target = pack / directory
-        target.mkdir()
-        for name in ("TRACK.JPK", "DMA1.JPK"):
-            shutil.copyfile(source / directory / name, target / name)
+        copy_circuit_files(source / directory, pack / directory)
     (pack / "tracks.big").write_bytes(tracks)
     (pack / "events.big").write_bytes(events)
     (pack / entry.slot).mkdir()

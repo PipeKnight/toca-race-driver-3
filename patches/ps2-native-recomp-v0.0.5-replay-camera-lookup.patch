@@ -1,0 +1,119 @@
+--- a/recomp/codegen.cpp
++++ b/recomp/codegen.cpp
+@@ -216,5 +216,6 @@
+         out_.str({});
+         const bool asset_hooks = !relocatable_ && !options_.live_stamp &&
+-            ((base_ <= 0x002568E4u && 0x002568E4u < end) ||
++            ((base_ <= 0x001EC1FCu && 0x001EC1E0u < end) ||
++             (base_ <= 0x002568E4u && 0x002568E4u < end) ||
+              (base_ <= 0x002566E0u && 0x002566E0u < end) ||
+              (base_ <= 0x00389084u && 0x00388F98u < end) ||
+@@ -262,4 +263,17 @@
+                     line("if (disc::dtm_variant_record(c.r[4].w[0], c.r[5].w[0])) "
+                          "{ set32(c.r[2], 1u); c.pc = c.r[31].w[0]; return; }");
++                // The replay director opens this file outside the track JPAK lookup.
++                if (a == 0x001EC1E0u && i.word == 0x03a0202du) {
++                    line("st32(c.r[29].w[0] + 276u, 0u);");
++                    line("if (const auto size = disc::replay_camera_size(c.r[29].w[0])) { "
++                         "st32(c.r[29].w[0] + 276u, size); set32(c.r[4], size + 1u); set32(c.r[5], 64u); "
++                         "c.r[31].sd[0] = 0x001EC1FC; c.budget -= 7; call(c, 0x003F78B0u, depth + 1u); "
++                         "if (c.pc != 0x001EC1FCu) return; goto L_001EC1FC; }");
++                }
++                if (a == 0x001EC1FCu && i.word == 0x12200002u)
++                    line("if (const auto size = ld32(c.r[29].w[0] + 276u)) { "
++                         "const bool loaded = disc::copy_replay_camera(c.r[29].w[0], c.r[2].w[0], size); "
++                         "set32(c.r[16], loaded ? c.r[2].w[0] : 0u); "
++                         "st32(c.r[29].w[0] + 272u, loaded ? size : 0u); }");
+                 if (a == 0x002568E4u && i.word == 0x27a50080u)
+                     line("disc::road_america_path(c.r[29].w[0]);");
+--- a/runtime/include/ps2/disc.hpp
++++ b/runtime/include/ps2/disc.hpp
+@@ -40,4 +40,6 @@
+ bool dtm_variant_record(std::uint32_t filename, std::uint32_t record);
+ std::uint32_t road_america_member(std::uint32_t address, std::uint32_t scratch);
++std::uint32_t replay_camera_size(std::uint32_t name);
++bool copy_replay_camera(std::uint32_t name, std::uint32_t buffer, std::uint32_t size);
+ std::optional<Entry> find(const std::string &path);
+ std::uint32_t layer1_start();
+--- a/runtime/src/disc.cpp
++++ b/runtime/src/disc.cpp
+@@ -79,4 +79,6 @@
+     std::array<std::array<std::vector<std::uint8_t>, 2>, imported_track_ids.size()> packages;
+     std::array<std::vector<std::uint8_t>, road_america_rain_members.size()> rain;
++    std::array<std::vector<std::uint8_t>, imported_track_ids.size()> replay_cameras;
++    std::vector<std::uint8_t> rain_replay_camera;
+     // One selection per reference resource. Zero keeps the stock Oschersleben read.
+     std::array<std::atomic_uint, 2> selected{};
+@@ -109,4 +111,20 @@
+ }
+
++bool load_replay_camera(const std::filesystem::path &folder, std::vector<std::uint8_t> &data) {
++    const auto path = folder / "replay-cameras.ini";
++    std::error_code error;
++    if (!std::filesystem::exists(path, error)) return !error;
++    const auto size = std::filesystem::file_size(path, error);
++    if (error || !size || size > 65536u) return false;
++    const auto filename = os::utf8(path);
++    auto *file = os::open(filename, "rb");
++    if (!file) return false;
++    data.resize(static_cast<std::size_t>(size));
++    const bool complete = std::fread(data.data(), 1, data.size(), file) == data.size() &&
++                          std::fgetc(file) == EOF && !std::ferror(file);
++    std::fclose(file);
++    return complete;
++}
++
+ bool prepare_road_america() {
+     const auto &folder = g_road_america_directory;
+@@ -126,4 +144,8 @@
+     for (unsigned course = 0; course < mod->courses; ++course) {
+         const auto resources = course == 0 ? root : root / imported_track_folders[course];
++        if (!load_replay_camera(resources, mod->replay_cameras[course])) {
++            std::fprintf(stderr, "[road-america] invalid replay camera file for %s\n", imported_track_ids[course]);
++            return false;
++        }
+         for (std::size_t i = 0; i < mod->packages[course].size(); ++i) {
+             if (!load_track_overlay(resources, road_america_members[i + 2], mod->packages[course][i])) return false;
+@@ -163,4 +185,8 @@
+     }
+     if (has_rain) {
++        if (!load_replay_camera(rain_folder, mod->rain_replay_camera)) {
++            std::fprintf(stderr, "[road-america] invalid Road America Rain replay camera file\n");
++            return false;
++        }
+         for (std::size_t i = 0; i < mod->rain.size(); ++i) {
+             if (!load_track_overlay(rain_folder, road_america_rain_members[i], mod->rain[i])) return false;
+@@ -948,4 +974,33 @@
+ }
+
++static const std::vector<std::uint8_t> *replay_camera(std::uint32_t address) {
++    if (!g_road_america) return nullptr;
++    const auto &mod = *g_road_america;
++    const auto name = guest_name(address);
++    if (name.size() != 11 || name.substr(4) != "Cam.ini") return nullptr;
++    constexpr std::array keys{"tqa1", "tqa2", "tqa3", "tqa4", "tqa5"};
++    for (unsigned course = 0; course < mod.courses; ++course) {
++        if (name.substr(0, 4) != keys[course]) continue;
++        if (course == 0 && mod.selected[0].load() == road_america_rain && !mod.rain_replay_camera.empty())
++            return &mod.rain_replay_camera;
++        return &mod.replay_cameras[course];
++    }
++    return nullptr;
++}
++
++std::uint32_t replay_camera_size(std::uint32_t name) {
++    const auto *data = replay_camera(name);
++    return data ? static_cast<std::uint32_t>(data->size()) : 0u;
++}
++
++bool copy_replay_camera(std::uint32_t name, std::uint32_t buffer, std::uint32_t size) {
++    const auto *data = replay_camera(name);
++    if (!data || size != data->size() || buffer == 0 || buffer >= kRamSize || size >= kRamSize - buffer)
++        return false;
++    std::memcpy(g_ram + buffer, data->data(), size);
++    g_ram[buffer + size] = 0;
++    return true;
++}
++
+ std::uint32_t road_america_member(std::uint32_t address, std::uint32_t scratch) {
+     if (!g_road_america || scratch > kRamSize - 128u) return address;

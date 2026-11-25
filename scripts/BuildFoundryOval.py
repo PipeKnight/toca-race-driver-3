@@ -148,6 +148,15 @@ def build_packages(track, dma, work, *, route=None, markings=False):
     return track, replace_member(dma, ["trk.dma"], finished.read_bytes())
 
 
+def copy_circuit_files(source, target):
+    target.mkdir()
+    for name in ("TRACK.JPK", "DMA1.JPK"):
+        copyfile(source / name, target / name)
+    cameras = source / "replay-cameras.ini"
+    if cameras.is_file():
+        copyfile(cameras, target / cameras.name)
+
+
 def build_pack(source, output, work):
     foundry = TrackEntry("tqa4", "Foundry Oval", f"{LENGTH / 1000:.3f}", 36)
     tracks = track_catalog((source / "tracks.big").read_bytes(), (foundry,), existing=83)
@@ -155,9 +164,7 @@ def build_pack(source, output, work):
     pack = work / "pack"
     folders = ("", "tqa2", "tqa3") + (("rain",) if (source / "rain").exists() else ())
     for folder in folders:
-        (pack / folder).mkdir()
-        for name in ("TRACK.JPK", "DMA1.JPK"):
-            copyfile(source / folder / name, pack / folder / name)
+        copy_circuit_files(source / folder, pack / folder)
     (pack / "tracks.big").write_bytes(tracks)
     (pack / "events.big").write_bytes(events)
     track, dma = build_packages((pack / "TRACK.JPK").read_bytes(), (pack / "DMA1.JPK").read_bytes(), work)

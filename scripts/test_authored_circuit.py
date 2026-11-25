@@ -10,6 +10,7 @@ from BuildAuthoredCircuit import (
     GRID_APPROACH_METRES, PIT_HALF_WIDTH, Circuit, build_route, edges_touch, pit_inner_edge, pit_offset,
     preview, validate_ribbon,
 )
+from BuildFoundryOval import copy_circuit_files
 from BuildRoadAmericaMod import TrackEntry, read_bigf, repack_bigf, track_catalog
 from ImportRd2Car import variants
 from Ps2TrackCollision import read_triangles
@@ -19,6 +20,18 @@ from Ps2TrackRoute import PIT_STALL_COUNT, read_route
 class AuthoredCircuitTests(unittest.TestCase):
     def layout(self):
         return json.loads((Path(__file__).resolve().parents[1] / "tracks/tsukuba.json").read_text(encoding="utf-8"))
+
+    def test_pack_extension_keeps_existing_replay_cameras(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary) / "source"
+            source.mkdir()
+            for name in ("TRACK.JPK", "DMA1.JPK"):
+                (source / name).write_bytes(name.encode("ascii"))
+            camera = b"[Cameras]\r\nuNumCameras=0\r\n"
+            (source / "replay-cameras.ini").write_bytes(camera)
+            target = Path(temporary) / "target"
+            copy_circuit_files(source, target)
+            self.assertEqual((target / "replay-cameras.ini").read_bytes(), camera)
 
     def test_route_contains_ordered_ghost_splits_and_independent_pit_lane(self):
         circuit = Circuit(self.layout())

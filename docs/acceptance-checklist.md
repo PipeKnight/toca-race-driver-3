@@ -134,6 +134,7 @@ The Windows Direct3D 12 Oschersleben steering replay captured neutral, full left
 
 - [ ] Audit the route and collision for each layout and offered weather option. Inspect the start grid, timing splits, pit gates and stalls, and points along the racing line, pit route, and grid lanes. Review gaps between stations and check suspicious points in game.
 - [ ] Select the circuit from the correct event and verify its icon and weather choices. Drive the whole route and check road surfaces, scenery, tunnel and shadow transitions, sky, reflections, and stable rendering at speed. Verify grid heading, representative kerbs, barriers, runoff, and the reset position after leaving the road.
+- [ ] Open View Replay after a finish and select the trackside camera. Follow several camera changes and verify that the scene, road surface, and cars render around the car being followed.
 - [ ] Finish a race with traffic, confirm every timing sector and lap is counted, inspect AI behavior and the classification, and cold-load the autosave. When the race offers pits, test entry, service, exit, and mandatory pit-stop credit for the player and AI.
 - [ ] Save a Time Trial ghost, relaunch from the saved profile, and verify playback on that exact layout. Check that records for other layouts remain available.
 

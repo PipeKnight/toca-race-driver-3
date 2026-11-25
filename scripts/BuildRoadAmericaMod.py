@@ -428,6 +428,20 @@ def repack_jpak(original, count, replacements, extent=None, *, compressor=encode
     return output
 
 
+def convert_replay_cameras(source):
+    # The PS2 camera files share revision 1. RD2 omits these two RD3 camera fields.
+    defaults = (b"fPitchOffset=0.000000", b"boBlackOut=FALSE")
+    sections = re.split(rb"(?m)(?=^\[)", source.rstrip(b"\0"))
+    for i, section in enumerate(sections):
+        if not re.match(rb"\[Camera_\d+\]", section, re.IGNORECASE):
+            continue
+        keys = {line.partition(b"=")[0].strip().lower() for line in section.splitlines()}
+        additions = [entry for entry in defaults if entry.partition(b"=")[0].lower() not in keys]
+        if additions:
+            sections[i] = b"\r\n".join((section.rstrip(), *additions, b"", b""))
+    return b"".join(sections)
+
+
 def track_package(original, collision, route):
     for _, _, name, row in jpak_entries(original, 44):
         if name == b"osc1.big":
@@ -445,7 +459,11 @@ def circuit_payloads(donor, scene, code, original_track, original_dma, route, *,
     with scene.path(donor).open("rb") as stream:
         geometry, _ = make_overlay(original_dma, stream, donor_sector=scene.sector, donor_prefix=code,
                                    donor_members_count=len(scene.entries), reference_members=("sky.dma",) if rain else ())
-    return {"TRACK.JPK": track_package(original_track, collision, route), "DMA1.JPK": geometry}
+    payloads = {"TRACK.JPK": track_package(original_track, collision, route), "DMA1.JPK": geometry}
+    camera_name = f"{code}cam.ini"
+    if camera_name in scene.names:
+        payloads["replay-cameras.ini"] = convert_replay_cameras(scene.member(donor, camera_name))
+    return payloads
 
 
 def build_pack(reference_disc, donor, destination, courses, sunny_number=None, rain_number=None):

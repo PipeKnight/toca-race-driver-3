@@ -8,7 +8,9 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from BuildRoadAmericaMod import convert_pit, convert_route, pit_distances, road_america_weather, route_counts
+from BuildRoadAmericaMod import (
+    convert_pit, convert_replay_cameras, convert_route, pit_distances, road_america_weather, route_counts,
+)
 from ImportRd2Car import discover_mechanics
 from ImportRd2Track import check_ground, check_ground_segments
 from Rd2AssetCatalog import BIGF_ENTRY, HEADER, HEADER_BYTES, SECTOR_SIZE, read_index, scan_disc
@@ -24,6 +26,17 @@ def archive(names):
 
 
 class Rd2AssetCatalogTests(unittest.TestCase):
+    def test_replay_camera_conversion_supplies_missing_rd3_fields(self):
+        source = (b"[Camera_001]\r\nfPositionx=34.0\r\n\r\n"
+                  b"[Camera_002]\r\nfPitchOffset=0.250000\r\nboblackout=TRUE\r\n\r\n"
+                  b"[Activation_Zone_001]\r\nuCamera000=1\r\n")
+        converted = convert_replay_cameras(source)
+        self.assertEqual(converted, source.replace(
+            b"fPositionx=34.0\r\n\r\n",
+            b"fPositionx=34.0\r\nfPitchOffset=0.000000\r\nboBlackOut=FALSE\r\n\r\n",
+        ))
+        self.assertEqual(convert_replay_cameras(converted), converted)
+
     def test_cockpit_and_damage_lookup_uses_the_number_configuration_variant(self):
         def package(number, damage, interior):
             files = {"num.ini": number, "dmg.ini": damage, "int.ini": interior}
