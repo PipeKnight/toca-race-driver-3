@@ -6,7 +6,7 @@ The authoring tool uses a local Foundry Oval pack as a base. It retains the orig
 
 ## Build and run Tsukuba
 
-Use Python 3.10 or later, Race Driver 2 `SLES-52638` v1.02, and TOCA Race Driver 3 `SLUS-21182` v1.02. Rebuild the Windows launcher from the current source manifest: earlier released previews only know the first four extra slots. See [Windows preview build instructions](windows-preview.md). A prepared developer runner with the fifth-slot patch can also launch the pack with the same `--road-america` option.
+Use Python 3.10 or later, Race Driver 2 `SLES-52638` v1.02, and TOCA Race Driver 3 `SLUS-21182` v1.02. The fifth circuit slot and generated selection icons are available in Windows `v0.1.0-preview.8`. A developer runner built with the current source manifest can also launch the pack with `--road-america`. [Windows preview instructions](windows-preview.md)
 
 Run these commands from the repository root. Set `$rd2` and `$rd3` to mounted or extracted disc directories containing their `.DIR` and `.HUG` files; the launcher itself can use an RD3 ISO. Use a new directory for each build output.
 

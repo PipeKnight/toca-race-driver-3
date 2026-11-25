@@ -2,7 +2,7 @@
 
 The launcher packages the first-run setup for Windows 11 x64. Supply your own North American PS2 disc, `SLUS-21182` v1.02, as an ISO, a matching DVD CHD, or a directory of extracted disc files. Keep the disc available at launch. The launcher builds the runner locally and reads the original disc in place. The package includes the launcher, setup scripts, patches, and pinned upstream source archives.
 
-Windows `v0.1.0-preview.7` ships as a single portable `TocaRecomp.exe`. It adds the optional QA Touring car to DTM Free Race and retains the four-course pack and earlier DTM overlays. Clean installation uses Windows Sandbox with software graphics. Direct3D 12 race tests use an existing Windows 11 installation. [Windows x64 release](https://github.com/PipeKnight/toca-race-driver-3/releases/tag/v0.1.0-preview.7)
+Windows `v0.1.0-preview.8` ships as a single portable `TocaRecomp.exe`. It supports Tsukuba in the fifth optional circuit slot, generated circuit selection icons, and the experimental DB5 overlay. Clean installation uses Windows Sandbox with software graphics. Direct3D 12 race tests use an existing Windows 11 installation. [Windows x64 release](https://github.com/PipeKnight/toca-race-driver-3/releases/tag/v0.1.0-preview.8)
 
 The earlier `0.1.0-preview.1` archive requires its `support` directory next to `TocaRecomp.exe`. [Previous Windows release](https://github.com/PipeKnight/toca-race-driver-3/releases/tag/v0.1.0-preview.1)
 
@@ -58,6 +58,14 @@ Connect the controller before launching. Use a fresh data directory to test prof
 Finish an event, wait for autosave, and close the game. Use `--direct --fullscreen` with the same data and setup directories to confirm that the profile and progress load. The data directory contains `logs/ps2run_*.log`. With `PS2_PAD_LOG=1`, the log records the controller name and input transitions for the guest ports. This run provides physical input and driver coverage on the existing installation. The clean desktop release test uses the full combination in a fresh installation.
 
 ## Verification
+
+### Windows preview 8 release
+
+The release executable SHA-256 is `c62e30897ebc473133db6892369e0f6db944969ce4ea8f7d237eb0df5629f46c`. It completed an offline clean launch from the reference ISO and pinned dependency archives in Windows Sandbox build `26100.9606`. The first run reached frame 780. A fresh process ran directly to frame 540 with the same prepared runner hash. The executable contains 32 setup resources.
+
+A copied Sprintcar profile and settings from an earlier preview loaded through frame 3120 both in Sandbox and on the Windows host with the RTX 4070 on Direct3D 12. Both runs read 341 card pages without writing to the card. The profile and settings hashes stayed unchanged. Sandbox also started the five-circuit pack and the DB5 overlay together through frame 150 using the separate `road-america-dtm.ps2` card. Local evidence is in `local/release-preview-8/`.
+
+The circuit and vehicle results are recorded by asset. Stock windshield glare, additional mandatory pit races on RD2 layouts, and the remaining imported vehicle rendering checks stay open. [Import acceptance](acceptance-checklist.md#import-acceptance-by-asset)
 
 ### Windows preview 7 release
 

@@ -1,14 +1,14 @@
 # TOCA Race Driver 3 Recompilation for Windows 11 x64
 
-Version `0.1.0-preview.7` is a development preview for the North American PS2 disc `SLUS-21182` v1.02. Use a disc image from your own copy. The launcher compiles the original executable locally and reads the original disc at runtime. A PS2 BIOS and PCSX2 are unnecessary.
+Version `0.1.0-preview.8` is a development preview for the North American PS2 disc `SLUS-21182` v1.02. Use a disc image from your own copy. The launcher compiles the original executable locally and reads the original disc at runtime. A PS2 BIOS and PCSX2 are unnecessary.
 
 ## Changes in this preview
 
-- The DTM add-on can load an additional Mercedes variant with edited model meshes and the original Mercedes mechanics. Its default driver is QA Touring. The introductory race assigns it to the player, and it becomes selectable in DTM Free Race after the usual unlock.
-- Build a new add-on directory with the updated `BuildDtmVariant.py` to see QA Touring in the selector. The `--dtm-mod PATH` option still supports the earlier introductory-only add-on and the stock mesh overlays.
-- The optional circuit pack still supports Foundry Oval, Road America, and both A1-Ring layouts. It can be enabled at the same time as the DTM add-on.
+- The optional circuit pack supports authored Tsukuba alongside Foundry Oval, Road America, and both A1-Ring layouts. The Clio Cup track selector can display generated circuit outlines. Tsukuba's revised pit route and sixteen stalls classified all 20 cars in a five-lap race with a mandatory stop.
+- The Race Driver 2 circuit importer rebuilds the pit driving line, stall markers, and distances. It audits collisions across the pit route and supports standalone layouts. A1-Ring Short and Adelaide completed player pit service in Windows tests.
+- The DTM add-on supports the experimental Aston Martin DB5 converted from Race Driver 2. Its pack offers a donor cockpit and sound options, and the runner supports its forward and rear-facing bonnet positions. The other RD2 vehicle conversions remain development tools.
 
-Build the add-ons from your own files. [Additional DTM variant](https://github.com/PipeKnight/toca-race-driver-3/blob/main/docs/modding.md#test-an-additional-dtm-variant) · [Foundry Oval instructions](https://github.com/PipeKnight/toca-race-driver-3/blob/main/docs/modding.md#build-and-play-foundry-oval)
+Build the add-ons locally with the scripts from this release and your own copies of the two games. [Tsukuba and track authoring](https://github.com/PipeKnight/toca-race-driver-3/blob/v0.1.0-preview.8/docs/author-a-circuit.md) · [Race Driver 2 circuit and DB5 conversion](https://github.com/PipeKnight/toca-race-driver-3/blob/v0.1.0-preview.8/docs/race-driver-2-import.md)
 
 ## First launch
 
@@ -28,4 +28,4 @@ The launcher folder holds the memory card `toca-slus-21182.ps2` and game setting
 
 ## Verification scope
 
-The clean setup checks use Windows Sandbox with software graphics. The DTM race checks use Direct3D 12 on an existing Windows 11 installation. The Free Race test used an isolated profile with the DTM event data assigned to an unlocked event. It selected QA Touring and started a 21-car field on Hockenheim GP and Oschersleben. General-purpose car import, extra Road America weather, and full-game desktop acceptance remain open. Stream-buffer warnings can still occur on Silverstone and UK Rally 3, and software graphics can cause audio underruns. [Windows verification and open acceptance items](https://github.com/PipeKnight/toca-race-driver-3/blob/main/docs/acceptance-checklist.md)
+Clean setup uses Windows Sandbox with software graphics. Race and mod validation uses Direct3D 12 on an existing Windows 11 installation. Stock windshields can appear brighter than the PCSX2 reference. Mandatory stops across the entire imported circuit set, mirror reflections on the DB5, general-purpose car import, and full-game desktop acceptance remain open. Stream-buffer warnings can still occur on Silverstone and UK Rally 3, and software graphics can cause audio underruns. [Verification and open acceptance items](https://github.com/PipeKnight/toca-race-driver-3/blob/v0.1.0-preview.8/docs/acceptance-checklist.md)

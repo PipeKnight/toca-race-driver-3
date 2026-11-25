@@ -134,7 +134,7 @@ Each RD2 mechanics row has 130 columns. The RD3 QA Touring rows each have 200 co
 
 ### Build the experimental pack from both discs
 
-Use a local Windows launcher built with the converted model and variant type patches from the source manifest. The released Windows preview 7 expects the older fixed-size variant files.
+Use Windows `v0.1.0-preview.8` or a launcher built from the current source manifest. These builds include the converted model and variant type patches.
 
 ```powershell
 $pack = Join-Path $work 'DB5 drive test'
