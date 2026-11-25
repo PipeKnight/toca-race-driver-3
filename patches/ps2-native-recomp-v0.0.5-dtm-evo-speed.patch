@@ -1,0 +1,128 @@
+diff --git a/runtime/include/ps2/disc.hpp b/runtime/include/ps2/disc.hpp
+--- a/runtime/include/ps2/disc.hpp
++++ b/runtime/include/ps2/disc.hpp
+@@ -36,7 +36,7 @@
+ bool road_america_enabled();
+ void road_america_path(std::uint32_t address);
+ bool dtm_variant_uses_legacy_sound(std::uint32_t mechanics_name);
+-void update_db5_gauges(std::uint64_t frame);
++void update_cockpit_instruments(std::uint64_t frame);
+ bool dtm_variant_record(std::uint32_t filename, std::uint32_t record);
+ std::uint32_t road_america_member(std::uint32_t address, std::uint32_t scratch);
+ std::optional<Entry> find(const std::string &path);
+diff --git a/runtime/src/disc.cpp b/runtime/src/disc.cpp
+--- a/runtime/src/disc.cpp
++++ b/runtime/src/disc.cpp
+@@ -263,9 +263,11 @@
+     std::vector<std::uint8_t> events;
+     std::vector<std::uint8_t> db5_cameras;
+     std::uint32_t event_archive_sector = 0;
++    bool evo_speed = false;
+     bool db5_dials = false;
+     std::uint64_t previous_gauge_frame = 0;
+     std::array<std::array<std::uint32_t, 4>, 2> gauge_streams{};
++    std::array<std::array<std::uint32_t, 4>, 3> evo_digits{};
+ };
+ std::unique_ptr<DtmVariant> g_dtm_variant;
+ 
+@@ -487,6 +489,19 @@
+         }
+     }
+ 
++    constexpr std::string_view speed_version = "EVO7SPEED 1\r\n";
++    const auto speed_path = root / "evo-speed.ini";
++    mod->evo_speed = std::filesystem::exists(speed_path, file_error);
++    if (mod->evo_speed || file_error) {
++        std::vector<std::uint8_t> speed_config;
++        if (file_error || has_type || u32(package.data() + 8) != 63 ||
++            !load_dtm_variant_file(speed_path, speed_config, speed_version.size(), speed_version.size()) ||
++            std::memcmp(speed_config.data(), speed_version.data(), speed_version.size())) {
++            std::fprintf(stderr, "[dtm-mod] invalid Lancer speed display configuration\n");
++            return false;
++        }
++    }
++
+     auto relative = dtm_variant_first_sector;
+     for (std::size_t i = 0; i < mod->files.size(); ++i) {
+         if (mod->files[i].empty()) continue;
+@@ -843,9 +858,66 @@
+     return false;
+ }
+ 
+-void update_db5_gauges(std::uint64_t frame) {
+-    if (!g_dtm_variant || !g_dtm_variant->db5_dials) return;
++static void update_evo_speed(DtmVariant &mod, std::uint64_t frame) {
++    // The PS2M builder identifies the three UV streams in ignored VIF NOP arguments.
++    constexpr std::uint32_t uv_offset = 176;
++    constexpr std::uint32_t uv_bytes = 32;
++    constexpr std::uint32_t limit = kRamSize - uv_offset - uv_bytes - 4;
++    const auto valid = [](std::uint32_t at, std::size_t slot) {
++        return at && !(at & 3u) && at <= limit && ld32(at) == 0x5645 && ld32(at + 4) == 0x374f &&
++               ld32(at + 8) == slot && ld32(at + uv_offset - 4) == 0x74040108u &&
++               ld32(at + uv_offset + uv_bytes) == 0x6e044109u;
++    };
++    bool missing = false;
++    for (std::size_t i = 0; i < mod.evo_digits.size(); ++i)
++        missing |= !valid(mod.evo_digits[i][0], i);
++    if (frame <= mod.previous_gauge_frame || frame % 600 == 0 || (missing && frame % 120 == 0)) {
++        for (auto &group : mod.evo_digits) group.fill(0);
++        const auto *end = g_ram + limit;
++        const auto *at = g_ram;
++        std::array<std::size_t, 3> used{};
++        while (at < end) {
++            const auto *match = static_cast<const std::uint8_t *>(std::memchr(at, 0x45, end - at));
++            if (!match) break;
++            const auto address = static_cast<std::uint32_t>(match - g_ram);
++            if (!(address & 3u) && ld32(address) == 0x5645 && ld32(address + 4) == 0x374f) {
++                const auto slot = ld32(address + 8);
++                if (slot < used.size() && used[slot] < mod.evo_digits[slot].size() && valid(address, slot))
++                    mod.evo_digits[slot][used[slot]++] = address;
++            }
++            at = match + 1;
++        }
++    }
++    mod.previous_gauge_frame = frame;
++
++    // Same SLUS-21182 v1.02 player speed in m/s used by the DB5 gauge.
++    const float speed = std::abs(std::bit_cast<float>(ld32(0x005f49d4u)));
++    if (!std::isfinite(speed) || speed > 250.f) return;
++    const unsigned mph = static_cast<unsigned>(speed * 2.236936f);
++    constexpr std::array<unsigned, 3> places{100, 10, 1};
++    for (std::size_t i = 0; i < places.size(); ++i) {
++        const bool blank = i < 2 && mph < places[i];
++        const unsigned digit = mph / places[i] % 10;
++        const float x = blank ? 126.5f : 96.5f + (digit % 4) * 8;
++        const float y = blank ? 127.5f : 96.5f + (digit / 4) * 10;
++        const float right = x + (blank ? 1.f : 7.f);
++        const float uv[8] = {x / 128, y / 128, x / 128, (y + (blank ? 0 : 9)) / 128,
++                             right / 128, y / 128, right / 128, (y + (blank ? 0 : 9)) / 128};
++        for (const auto address : mod.evo_digits[i]) {
++            if (valid(address, i))
++                std::memcpy(g_ram + address + uv_offset, uv, sizeof(uv));
++        }
++    }
++}
++
++void update_cockpit_instruments(std::uint64_t frame) {
++    if (!g_dtm_variant) return;
+     auto &mod = *g_dtm_variant;
++    if (mod.evo_speed) {
++        update_evo_speed(mod, frame);
++        return;
++    }
++    if (!mod.db5_dials) return;
+     // The generated PS2M stores the identifiers as VIF NOP arguments. Only touch
+     // aligned packets whose following command unpacks exactly three needle vertices.
+     constexpr std::array<std::uint32_t, 2> kinds{0x5053, 0x5052};
+diff --git a/runtime/src/system.cpp b/runtime/src/system.cpp
+--- a/runtime/src/system.cpp
++++ b/runtime/src/system.cpp
+@@ -384,7 +384,7 @@
+     latch_pads();
+     quick::frame_check();
+     apply_patches(false);
+-    disc::update_db5_gauges(g_frames);
++    disc::update_cockpit_instruments(g_frames);
+     track_words();
+     ee::live::frame_tick();   // code windows that settled are translated in the background, finished libraries come in here (docs/gvz.md)
+     if (g_options.on_vblank) g_options.on_vblank();

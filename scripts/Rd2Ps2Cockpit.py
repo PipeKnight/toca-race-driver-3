@@ -7,12 +7,38 @@ from BuildTrackGeometryOverlay import read_word, vif_commands
 from Ps2CarModel import UV, VERTEX
 
 
-def cockpit_part(data, part_id):
+def cockpit_directory(data):
     if len(data) < 0x130 or data[:8] != b"CP3D\x01\x01\x06\x02":
         raise ValueError("Expected an RD2 PS2 CP3D cockpit")
     directory = read_word(data, 8)
     if not 0x130 <= directory <= len(data) - 0x38:
         raise ValueError("Invalid CP3D cockpit directory")
+    return directory
+
+
+def material_group(data, group, directory):
+    if not 0x130 <= group <= directory - 0x30:
+        raise ValueError("Invalid CP3D material group")
+    name = read_word(data, group + 0x28)
+    if not 0x130 <= name < directory:
+        raise ValueError("Invalid CP3D material name")
+    end = data.find(b"\0", name, min(name + 32, directory))
+    if end <= name:
+        raise ValueError("Invalid CP3D material name")
+    return data[name:end].decode("ascii"), tuple(draw_strips(data, read_word(data, group + 4), directory))
+
+
+def cockpit_group(data, index):
+    directory = cockpit_directory(data)
+    count, entries = struct.unpack_from("<2I", data, directory + 0x20)
+    if not 0 <= index < count or not directory + 0x30 <= entries <= len(data) - count * 8:
+        raise ValueError("Invalid CP3D material group directory")
+    group, = struct.unpack_from("<I", data, entries + index * 8)
+    return material_group(data, group, directory)
+
+
+def cockpit_part(data, part_id):
+    directory = cockpit_directory(data)
 
     instance = read_word(data, 0x128)
     visited = set()
@@ -28,16 +54,10 @@ def cockpit_part(data, part_id):
             entries = read_word(data, geometry + 4)
             if not 0x130 <= entries <= directory - 32 or read_word(data, entries + 4) != 1:
                 raise ValueError("Expected one CP3D material group for the part")
-            group = read_word(data, entries + 8)
-            if not 0x130 <= group <= directory - 0x30:
-                raise ValueError("Invalid CP3D material group")
-            name = read_word(data, group + 0x28)
-            if not 0x130 <= name < directory:
-                raise ValueError("Invalid CP3D material name")
-            end = data.find(b"\0", name, min(name + 32, directory))
-            if end <= name or not all(map(math.isfinite, struct.unpack("<16f", matrix))):
-                raise ValueError("Invalid CP3D part material or transform")
-            return matrix, data[name:end].decode("ascii"), tuple(draw_strips(data, read_word(data, group + 4), directory))
+            if not all(map(math.isfinite, struct.unpack("<16f", matrix))):
+                raise ValueError("Invalid CP3D part transform")
+            name, strips = material_group(data, read_word(data, entries + 8), directory)
+            return matrix, name, strips
         instance = read_word(data, node + 12)
     raise ValueError(f"Missing CP3D cockpit part {part_id}")
 

@@ -147,7 +147,7 @@ def build_test_pack(rd2, rd3, variant, *, donor_wheel=False):
             raise ValueError("Expected the Lancer's int_left donor cockpit")
         donor_model, donor_archive = discover_cockpit(rd2, "int_left")
         stock_archive = member(stock, "int_dtm.big")
-        px, big = convert_wheel(donor_model, member(donor_archive, "gen02.tm2"),
+        px, big = convert_wheel(donor_model, member(donor_archive, "gen02.tm2"), member(donor_archive, "disp_num.tm2"),
                                 member(stock, "int_dtm.px"), stock_archive, member(stock_archive, "int_01.tm2"))
         extra_members = ((b"int_evo.px", b"int_dtm.px", px), (b"int_evo.big", b"int_dtm.big", big))
     archive = append_variant(stock, cars["car.msh"], extra_members=extra_members)
@@ -178,8 +178,11 @@ def build_test_pack(rd2, rd3, variant, *, donor_wheel=False):
     if intro.count(assignment) != 1:
         raise ValueError("Expected one introductory DTM car assignment")
     events = replace_member(events, ["1st__.ini"], intro.replace(assignment, b"CareerOfferCarID = dtmx_20/CKL"))
-    return {"DTMX_EXT.JPK": archive, "QA_TOURING_HI.MSH": cars["car_hi.msh"],
+    pack = {"DTMX_EXT.JPK": archive, "QA_TOURING_HI.MSH": cars["car_hi.msh"],
             "DTMX_20_HI.TEX": cars["car_hi.tex"], "events.big": events}
+    if donor_wheel:
+        pack["evo-speed.ini"] = b"EVO7SPEED 1\r\n"
+    return pack
 
 
 def audit_bundle(folder, *, dtm_pack=False):
@@ -245,7 +248,7 @@ def main():
         command.add_argument("--output", type=Path, required=True, help="new output directory")
     convert.add_argument("variant", type=str.lower)
     test_pack.add_argument("variant", type=str.lower, choices=("bs_0",))
-    test_pack.add_argument("--donor-wheel", action="store_true", help="install the experimental RD2 steering wheel")
+    test_pack.add_argument("--donor-wheel", action="store_true", help="install the experimental RD2 steering wheel and speed display")
     build.add_argument("car", type=str.lower, choices=PLAYABLE)
     sound = build.add_mutually_exclusive_group()
     sound.add_argument("--stock-sound", action="store_true", help="retain the RD3 template engine audio")

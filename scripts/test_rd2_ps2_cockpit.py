@@ -32,6 +32,14 @@ def tim2(size, color):
     return bytes(head) + b"\x01" * (size * size) + bytes(len(color)) + color + bytes(254 * len(color))
 
 
+def digits_tim2():
+    head = bytearray(256)
+    head[:6] = b"TIM2\x04\x01"
+    struct.pack_into("<IIHH", head, 0x84, 128, 8192, 128, 16)
+    head[0x92:0x98] = b"\x03\x04\x80\x00\x80\x00"
+    return bytes(head) + b"\x22" * 8192 + bytes(8) + b"\x08\x09\x0a\x80" + bytes(116)
+
+
 class Rd2Ps2CockpitTests(unittest.TestCase):
     def test_cp3d_packet_preserves_positions_and_texture_coordinates(self):
         packet, strip = cockpit_packet(6, 0)
@@ -47,11 +55,15 @@ class Rd2Ps2CockpitTests(unittest.TestCase):
     def test_wheel_atlas_expands_rgb_palette_and_keeps_the_two_halves_separate(self):
         stock = bytes((50, 100, 150, 64))
         donor = bytes((200, 180, 160))
-        pixels, palette = combine_atlas(tim2(128, stock), tim2(256, donor))
-        self.assertEqual(pixels, (bytes(64) + b"\x80" * 64) * 128)
+        pixels, palette = combine_atlas(tim2(128, stock), tim2(256, donor), digits_tim2())
+        self.assertEqual(pixels[:96 * 128], (bytes(64) + b"\x80" * 64) * 96)
+        self.assertEqual(pixels[96 * 128:97 * 128], bytes(64) + b"\x80" * 32 + b"\xf2" * 32)
+        self.assertEqual(pixels[-32:], b"\xf0" * 32)
         self.assertEqual(palette[:4], stock)
         at = clut_slot(128) * 4
         self.assertEqual(palette[at:at + 4], donor + b"\x80")
+        at = clut_slot(242) * 4
+        self.assertEqual(palette[at:at + 4], b"\x08\x09\x0a\x80")
 
     def test_upper_rim_joins_the_actual_open_endpoints(self):
         right = tuple((.10 - i * .004, .10 - i * .004, .001 * i) for i in range(5))
