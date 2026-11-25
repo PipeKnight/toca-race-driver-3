@@ -263,10 +263,10 @@ def build(rd2, rd3, donor_sound=False, donor_cockpit=False, *, donor_effects=Fal
     if replaced != 1 or read_part_map(part_map)[0][2] == 0xffffffff:
         raise ValueError("The DB5 cockpit exterior part is unavailable")
     if donor_cockpit:
-        # Keep the right-hand seat and frame the road above the dash through the donor windscreen.
+        # Keep the right-hand seat and frame the road, instruments, and steering rim together.
         interior = b"\r\n".join(line for line in donor_interior.splitlines()
                                 if line and not line.startswith((b"Netting=", b"DigitialDisplay="))) + b"\r\n"
-        camera = b"[Camera]\r\nAngle=-0.02\r\nZoom=0.87\r\nZ=0.23\r\nY=1.72\r\nX=0.32\r\n"
+        camera = b"[Camera]\r\nAngle=0.05\r\nZoom=0.94\r\nZ=0.13\r\nY=1.70\r\nX=0.32\r\n"
         interior, count = re.subn(rb"(?ms)^\[Camera\]\r\n.*?(?=^\[Shift\])", camera, interior)
         if count != 1:
             raise ValueError("Expected one DB5 interior camera section")

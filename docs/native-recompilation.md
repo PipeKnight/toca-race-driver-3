@@ -601,6 +601,12 @@ An offline Windows setup built from the updated patch produced byte-identical Di
 
 On Donington National, three GT Light captures from the same checkpoint and inputs differed from Preview 8 by four, one, and one pixels respectively. In a Road America Rain replay with the stock Clio, the three captures at frames 8,000, 8,190, and 8,400 differed in 35, 39, and 28 pixels. In each frame the differences were confined to a strip up to four pixels tall at the top of the rear glass. The additional two entries still need coverage across the rest of the vehicle and weather matrix.
 
+### Stock cockpit framing
+
+The stock Mercedes on the Oschersleben straight at 64 mph shows the road, hood, and dash at the same relative heights in PCSX2 2.8.2 and the Windows Direct3D 12 build. Both frames show only the upper part of the steering rim along the lower edge. The PCSX2 capture is at 3:15.18 and the native capture is at 3:15.06. The scenes are close in time with small differences in traffic and road position. The local comparison is `local/modding-preview-combined/stock-mercedes-cockpit-reference.png`.
+
+The stock Clio on Road America Rain also shows a partial rim. Five matched captures from the same native checkpoint in Preview 8 and the updated runtime had pixel differences confined to a narrow strip over a distant opponent's rear glass. A PCSX2 reference for the Clio remains open.
+
 Two unpaced Direct3D 12 runs per configuration used the same 413-frame Oschersleben segment, controller inputs, and warm VU1 caches. With process startup included, the timed compiled path took 4.51 to 4.52 seconds, the previous timed interpreter path took 8.04 to 8.60 seconds, and stock timing took 4.53 to 5.25 seconds. These timings measure the selected checkpoint on the Windows 11 test machine. Logs and raw timings are in `local/native-toca/reflection-validation/efu-compiled/`.
 
 Local draw dumps and logs are in `local/native-toca/reflection-validation/`. `oescher-efu-timing-comparison.png` shows the matched Oschersleben frames, and `efu-timing-comparison.png` covers the four additional cases. Both show stock timing on the left and the fix on the right. The original pass-suppression experiment remains in `local/native-toca/reflection-pass-comparison.png`. [ps2-native-recomp v0.0.5 source](https://github.com/exoteric33/ps2-native-recomp/releases/tag/v0.0.5)
