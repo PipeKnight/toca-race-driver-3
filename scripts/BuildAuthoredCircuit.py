@@ -10,8 +10,9 @@ import struct
 from tempfile import TemporaryDirectory
 
 from BuildFoundryOval import build_packages, copy_circuit_files, write_obj
-from BuildRoadAmericaMod import TrackEntry, event_catalog, track_catalog
+from BuildRoadAmericaMod import TrackEntry, event_catalog, repack_jpak, track_catalog
 from BuildTrackMapIcons import build_icons
+from ModAssets import find_member, members, replace_member
 from Ps2TrackRoute import EVENT, MAGIC, PIT_STALL_COUNT, POINT, SECTION, read_route
 
 PIT_HALF_WIDTH = 3.4
@@ -20,6 +21,9 @@ PIT_ROUTE_CLEARANCE_METRES = 98
 AI_MARGIN_TRANSITION_METRES = 55
 AI_ZONE_TRANSITION_METRES = 65
 AI_CORNER_MARKERS = (9, 18, 8)
+AI_MAX_CHECKPOINTS = 24
+AI_DEFAULT_SPEED_KMH = 300
+AI_SPEED_RECORD = struct.Struct("<IHH")
 
 
 def unit(x, z):
@@ -123,6 +127,16 @@ class Circuit:
                                           for zone in layout.get("ai_lane_margin_zones", ()))
         self.ai_corners = tuple((float(corner["approach_m"]), float(corner["apex_m"]), float(corner["exit_m"]))
                                 for corner in layout.get("ai_corners", ()))
+        self.ai_speed_targets = {}
+        for target in layout.get("ai_speed_targets", ()):
+            distance = float(target["distance_m"])
+            speed = target["speed_kmh"]
+            if not 0 < distance < self.length or not isinstance(speed, int) or not 40 <= speed <= 300:
+                raise ValueError("AI speed targets need a distance inside the lap and an integer speed of 40–300 km/h")
+            station = round(distance * len(self.stations) / self.length)
+            if not 0 < station < len(self.stations) or station in self.ai_speed_targets:
+                raise ValueError("AI speed targets must occupy distinct stations away from start/finish")
+            self.ai_speed_targets[station] = speed
         previous_exit = 0.
         for approach, apex, exit_ in sorted(self.ai_corners):
             if not previous_exit < approach < apex < exit_ < self.length:
@@ -222,6 +236,15 @@ def build_route(circuit):
             if station >= count or station in markers:
                 raise ValueError(f"AI corner marker at {distance:g} m overlaps another route marker")
             markers[station] = (code, 255, 0)
+    for station in circuit.ai_speed_targets:
+        if station in markers and markers[station][0] != 10:
+            raise ValueError(f"AI speed target at station {station} overlaps another route marker")
+        markers[station] = (10, 0, 0)
+    checkpoints = [station for station, marker in sorted(markers.items()) if marker[0] == 10]
+    if len(checkpoints) > AI_MAX_CHECKPOINTS:
+        raise ValueError("The native AI speed profile supports at most 24 checkpoints")
+    for tag, station in enumerate(checkpoints):
+        markers[station] = (10, tag, 0)
     main = [(d, 0., *markers.get(i, (0, 255, 0))) for i, d in enumerate(stations)]
     pit_markers = {-55: (5, 255, 0), -50: (14, 255, 0), 0: (6, 255, 0),
                    50: (15, 255, 0), 60: (11, 255, 0), 90: (3, 255, 0)}
@@ -258,6 +281,27 @@ def build_route(circuit):
     route = MAGIC + headers + events + points
     read_route(route)
     return route
+
+
+def build_ai_speed_profile(circuit, route):
+    main, _, _ = read_route(route)
+    speeds = [circuit.ai_speed_targets.get(station, AI_DEFAULT_SPEED_KMH)
+              for station, event in enumerate(main.events) if event[3] == 10]
+    # The native AIB reader maps each record to the route's next checkpoint tag.
+    return struct.pack("<IIHH", 12, AI_SPEED_RECORD.size, 0, len(speeds)) + b"".join(
+        AI_SPEED_RECORD.pack(0, speed, 0) for speed in speeds)
+
+
+def install_ai_speed_profile(track, profile):
+    nested = find_member(track, "osc1.big")[0].read(track)
+    directory = list(members(nested))
+    # The runner resolves imported AI filenames against the template's osc1 prefix.
+    replacements = {member.name.encode("ascii"): profile for member in directory
+                    if member.name.lower().endswith(".aib")}
+    if b"osc1_____.aib" not in replacements:
+        raise ValueError("The reference track has no fallback AI speed profile")
+    nested = bytes(repack_jpak(nested, len(directory), replacements))
+    return replace_member(track, ["osc1.big"], nested)
 
 
 def build_replay_cameras(circuit):
@@ -378,6 +422,8 @@ def build(circuit, source, output, work, *, disc=None):
     route = preview(circuit, work)
     track, dma = build_packages((source / "TRACK.JPK").read_bytes(), (source / "DMA1.JPK").read_bytes(),
                                 work, route=route, markings=True, textured=False)
+    if circuit.ai_speed_targets:
+        track = install_ai_speed_profile(track, build_ai_speed_profile(circuit, route))
     pack = work / "pack"
     for directory in ("", "tqa2", "tqa3", "tqa4") + (("rain",) if (source / "rain").is_dir() else ()):
         copy_circuit_files(source / directory, pack / directory)

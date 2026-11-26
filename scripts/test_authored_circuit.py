@@ -9,8 +9,8 @@ import tempfile
 import unittest
 
 from BuildAuthoredCircuit import (
-    GRID_APPROACH_METRES, PIT_HALF_WIDTH, Circuit, build_replay_cameras, build_route, edges_touch, pit_inner_edge, pit_offset,
-    preview, validate_ribbon,
+    GRID_APPROACH_METRES, PIT_HALF_WIDTH, Circuit, build_ai_speed_profile, build_replay_cameras, build_route, edges_touch,
+    pit_inner_edge, pit_offset, preview, validate_ribbon,
 )
 from BuildFoundryOval import copy_circuit_files
 from BuildRoadAmericaMod import TrackEntry, read_bigf, repack_bigf, track_catalog
@@ -61,7 +61,7 @@ class AuthoredCircuitTests(unittest.TestCase):
         self.assertEqual(main.events[0][2:4], (2045.0, 6))
         self.assertEqual(len(main.events), 256)
         self.assertEqual([event[5] for event in main.events if event[3] == 2], [0, 1])
-        self.assertEqual([event[4] for event in main.events if event[3] == 10], [0, 1, 2])
+        self.assertEqual([event[4] for event in main.events if event[3] == 10], list(range(17)))
         self.assertAlmostEqual(math.dist(main.lanes[0][0], main.lanes[4][0]), circuit.width, places=3)
         self.assertEqual([event[3] for event in pit.events if event[3] not in (0, 3, 4)], [5, 14, 6, 15, 11])
         self.assertEqual(sum(event[3] == 1 for event in main.events), 1)
@@ -126,6 +126,23 @@ class AuthoredCircuitTests(unittest.TestCase):
             self.assertEqual(after, (*before[:3], code, *before[4:]))
         with self.assertRaisesRegex(ValueError, "overlaps another route marker"):
             build_route(Circuit(dict(layout, ai_corners=[{"approach_m": 1, "apex_m": 20, "exit_m": 40}])))
+
+    def test_ai_speed_records_follow_the_checkpoint_tags(self):
+        layout = self.layout()
+        circuit = Circuit(layout)
+        route = build_route(circuit)
+        profile = build_ai_speed_profile(circuit, route)
+        self.assertEqual(struct.unpack_from("<IIHH", profile), (12, 8, 0, 17))
+        speeds = (112, 65, 72, 72, 75, 300, 110, 75, 79, 98, 300, 115, 86, 60, 76, 100, 300)
+        self.assertEqual(list(struct.iter_unpack("<IHH", profile[12:])),
+                         [(0, speed, 0) for speed in speeds])
+        main, pit, grid = read_route(route)
+        old, old_pit, old_grid = read_route(build_route(Circuit(dict(layout, ai_speed_targets=()))))
+        self.assertEqual((main.lanes, pit, grid), (old.lanes, old_pit, old_grid))
+        self.assertEqual([e for e in main.events if e[3] and e[3] != 10],
+                         [e for e in old.events if e[3] and e[3] != 10])
+        with self.assertRaisesRegex(ValueError, "overlaps another route marker"):
+            build_route(Circuit(dict(layout, ai_speed_targets=[{"distance_m": 80, "speed_kmh": 70}])))
 
     def test_solid_scene_batch_omits_the_inherited_texture_enable_bit(self):
         prefix = bytearray(24)

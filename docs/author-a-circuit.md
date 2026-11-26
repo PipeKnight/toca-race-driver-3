@@ -34,7 +34,7 @@ The Windows Direct3D 12 Tsukuba test loaded all 19 generated camera positions. A
 
 The original 20-car replay reached **13.09 m** from the centerline in the third hairpin. The road is 12 m wide. A separate full race with only the outer-lane margins still reproduced the overshoot when the player kept pace with traffic. The layout combines the inboard outer lanes and the approach, apex, and exit markers found on stock circuits.
 
-In a Windows 11 Direct3D 12 Free Race with virtual pad input, all 20 Clio Cup cars were classified and the game autosaved. The leader finished in **1:15.16** and Player One in **1:30.16**. The game loaded all 19 cameras and played the lap back through trackside views. Across the 19 AI cars, the third hairpin's largest measured center offset was **3.96 m** in the race and **3.97 m** in the replay. The corners of a 4.0 × 1.9 m envelope aligned to each car's measured heading stayed within 5.32 m of the centerline at the sampled positions, inside the 6 m paved half-width. The second hairpin also passed the test. The first hairpin and the kink at about 840 m still show excursions; their measured replay center offsets reached 16.08 m and 7.03 m.
+In a Windows 11 Direct3D 12 Free Race with virtual pad input, all 20 Clio Cup cars were classified and the game autosaved. The leader finished in **1:15.16** and Player One in **1:30.16**. The game loaded all 19 cameras and played the lap back through trackside views. Across the 19 AI cars, the third hairpin's largest measured center offset was **3.96 m** in the race and **3.97 m** in the replay. The corners of a 4.0 × 1.9 m envelope aligned to each car's measured heading stayed within 5.32 m of the centerline at the sampled positions, inside the 6 m paved half-width. The second hairpin also passed the test. In that build, the first hairpin and the kink at about 840 m still showed excursions. Their measured replay center offsets reached 16.08 m and 7.03 m.
 
 The test pack's `tqa5/osc1.ail` SHA-256 was `a96d88a8da11ae7c7ca247d243bebbd4226d72e5be3748232f1bb517034b550f`. Its `tqa5/DMA1.JPK` SHA-256 was `15559385b0d24ec85ee05ad7362296061266f551deb4329f219f3a53cd2076d1`. The logs and captures are in `local/modding-preview-combined/qa-tsukuba-corners-clearance-*/`.
 
@@ -43,6 +43,21 @@ The same route and scene also completed a five-lap Free Race with mandatory pit 
 An experimental inboard line reduced the kink's peak center offset from 7.02 m to 6.30 m at one player pace and from 9.35 m to 7.98 m at another. The tires still crossed the 6 m edge in both cases. Moving the first hairpin line inward earlier also shifted some excursions from the outside to the inside of the corner. These experiments remained outside the verified build.
 
 The software GS trace for the reported trackside shot showed the authored road draw change the sampled pixel from terrain to the road surface. The road’s vertex color was RGB `135,135,148`. The inherited texture changed the output to `108,126,75`. Disabling texture sampling on the authored draws restored the original RGB at the same pixel with the same camera, geometry, and car positions. The builder now generates these draws using solid vertex colors. The local pixel traces are in `local/modding-preview-combined/qa-tsukuba-green-pixel-270,265*/`.
+
+### Set AI braking targets for Tsukuba
+
+Tsukuba inherited the template circuit's AIB speed profiles. Moving AI lanes inward left the first hairpin and the kink near 840 m sensitive to traffic and approach speed. The authored course now has speed checkpoints before and through both turns and the third hairpin. At the first hairpin the target drops from 112 to 65 km/h. Through the kink it drops from 110 to 75 km/h. The third hairpin has a 60 km/h apex target. The builder updates the route checkpoint tags and the matching 72 class and fallback AIB members. The game loaded all 17 checkpoints in the Clio Cup. The collision, scene, and camera files matched the preceding build byte for byte.
+
+Two one-lap Windows 11 Direct3D 12 Free Races used different virtual-pad driving paces. The first classified all 20 competitors. Player One finished 19th in **1:29.37** and the leader finished in **1:20.13**. A second run finished in **1:32.25**. The first race's recorded inputs matched all 395 retained checkpoints. The run then opened **View Replay**, which used trackside cameras and showed gray pavement. All 19 AI cars were sampled in each of the four sections. The table shows the furthest point of a 4.0 × 1.9 m envelope aligned to the measured heading. The paved half-width is 6 m.
+
+| Section | Maximum across both races | Maximum in the trackside replay |
+| --- | ---: | ---: |
+| First hairpin | 5.03 m | 4.81 m |
+| Second hairpin | 5.26 m | 5.22 m |
+| Kink near 840 m | 4.93 m | 5.02 m |
+| Third hairpin | 5.25 m | 5.18 m |
+
+The race autosave passed the memory card filesystem and ECC checks. A separate launch displayed **Load Successful** and left the card byte-identical. Time Trial also loaded the existing **1:29.77** ghost without changing its card. The tested `tqa5/TRACK.JPK` SHA-256 is `a4e449c63ef31131aebbc599fc4ae2bd4b623ba9e7112df258573dcbd86d0d42`. The pack is in `local/tsukuba/pack-checkpoint-speeds-worldwide/`. The race, trackside replay, and load evidence is in `local/modding-preview-combined/qa-tsukuba-pace-final-*/` and `qa-tsukuba-pace17-*/`.
 
 ## Design your own layout
 
@@ -62,6 +77,8 @@ The software GS trace for the reported trackside shot showed the authored road d
 Use `ai_lane_margin_m` to move the outer AI lanes in from each paved edge. The margin tapers to zero at the pit approach and exit. An `ai_lane_margin_zones` entry with `from_m`, `to_m`, and `margin_m` can provide more clearance in a tight turn. The distances are measured from start/finish. The outer AI lanes must stay outside the inner lanes.
 
 For a tight corner, add an `ai_corners` entry with `approach_m`, `apex_m`, and `exit_m`. The builder places the original game’s corner markers at the nearest main-route stations. Place the approach marker before turn-in and use stations clear of timing, grid, and pit markers. Verify the turn in a full race with traffic. Tsukuba’s third hairpin uses the 1,094 m, 1,205 m, and 1,285 m markers.
+
+If opponents enter a corner too fast, add `ai_speed_targets` entries with `distance_m` and `speed_kmh`. Put a target at the point where the car needs that speed. The game plans braking toward the next checkpoint. The builder snaps the targets to main-route stations, numbers the checkpoints in driving order, and writes matching class and fallback AIB profiles. Use integer speeds from 40 to 300 km/h and at most 24 checkpoints including the generated ones. Keep speed checkpoints clear of the sector, corner, start-grid, and pit markers. Verify the result in a race with traffic and in its replay.
 
 The builder authors one extra circuit per pack in `tqa5`. The flat road and run-off share one collision surface, and the optional perimeter uses a separate barrier material. The game applies its route-based lap rules. A run-off surface with different grip, kerbs, and a banked or graded road need additional collision authoring. The catalog declares the generated pit lane on the right, as seen from a car traveling in race direction.
 

@@ -15,6 +15,22 @@
     {"approach_m": 730, "apex_m": 806, "exit_m": 895},
     {"approach_m": 1094, "apex_m": 1205, "exit_m": 1285}
   ],
+  "ai_speed_targets": [
+    {"distance_m": 170, "speed_kmh": 112},
+    {"distance_m": 217, "speed_kmh": 65},
+    {"distance_m": 238, "speed_kmh": 72},
+    {"distance_m": 289, "speed_kmh": 72},
+    {"distance_m": 314, "speed_kmh": 75},
+    {"distance_m": 776, "speed_kmh": 110},
+    {"distance_m": 818, "speed_kmh": 75},
+    {"distance_m": 838, "speed_kmh": 79},
+    {"distance_m": 864, "speed_kmh": 98},
+    {"distance_m": 1150, "speed_kmh": 115},
+    {"distance_m": 1194, "speed_kmh": 86},
+    {"distance_m": 1215, "speed_kmh": 60},
+    {"distance_m": 1250, "speed_kmh": 76},
+    {"distance_m": 1280, "speed_kmh": 100}
+  ],
   "perimeter_wall_m": 1.8,
   "sectors": [0.326, 0.695],
   "centerline": [
