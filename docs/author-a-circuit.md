@@ -59,6 +59,8 @@ Two one-lap Windows 11 Direct3D 12 Free Races used different virtual-pad driving
 
 The race autosave passed the memory card filesystem and ECC checks. A separate launch displayed **Load Successful** and left the card byte-identical. Time Trial also loaded the existing **1:29.77** ghost without changing its card. The tested `tqa5/TRACK.JPK` SHA-256 is `a4e449c63ef31131aebbc599fc4ae2bd4b623ba9e7112df258573dcbd86d0d42`. The pack is in `local/tsukuba/pack-checkpoint-speeds-worldwide/`. The race, trackside replay, and load evidence is in `local/modding-preview-combined/qa-tsukuba-pace-final-*/` and `qa-tsukuba-pace17-*/`.
 
+The same pack completed a five-lap mandatory-stop race. Player One entered the pits on lap two and finished 17th in **6:56.28**, including a 20-second driving penalty. All 19 opponents completed service and all 20 drivers had classified times. The autosave cold-loaded without writes and passed the filesystem and ECC checks. See `local/modding-preview-combined/qa-tsukuba-pace17-mandatory-*/`.
+
 ## Design your own layout
 
 1. Copy `tracks/tsukuba.json` to a new file. Use a printable ASCII `name` of up to 48 characters. Use `centerline` as a list of 8–256 `[x, z]` pairs in driving order (Y is height in the game). Prefer metres. The first anchor is start/finish; the tool closes the loop, so do not repeat the first point. A default flat height of 12 m can be changed with `height_m`.

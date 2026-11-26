@@ -32,6 +32,17 @@ The importer puts the donor `col.col` and the converted `AILD` v9 route into `TR
 
 For another RD2 circuit, use the [standalone builder](#discover-and-build-a-standalone-rd2-layout). It identifies the scene, collision, and `.aid` route, then checks their formats and whether the converted data fits the target slots. [Track authoring and validation](modding.md#tracks)
 
+### Select weather on an added circuit
+
+| Layout | Weather in the verified pack |
+| --- | --- |
+| Road America | Sunny and Rain when the separate wet package is present |
+| A1-Ring GP and Short | Sunny |
+| Foundry Oval and Tsukuba | Sunny |
+| Adelaide and `a13` standalone | Sunny |
+
+The event catalog lists the available choices for each layout. The Windows runner maps Road America's Rain selection to the scene and track archives in `rain`. The verified Sunny and Rain archives use identical route and collision members. The other packs supply one scene per layout. The standalone builder also writes a single Sunny choice when it imports a selected donor scene. Supporting another weather variant requires the corresponding course resources, runtime routing for that slot, and an in-game check of the new option.
+
 ## Extract and preview the Aston Martin DB5
 
 The RD2 Vintage class `BIGF` in `RD2_1.HUG` starts at sector 787442 and uses 7,009,268 bytes through the end of its last member. Its `lookup.ini` maps both `vc_2` and `vc_3` to `db5`. The example uses `vc_2` and exports the highest detail level with positions, UVs, and normals as OBJ. The OBJ contains geometry. Keep the extracted texture containers if you intend to work on the livery.
@@ -293,6 +304,14 @@ The rebuilt Short layout repeated the five-lap mandatory-stop race from power-on
 The Windows 11 Direct3D 12 test used the rebuilt Road America Sunny archive with sixteen paired stalls. The archive SHA-256 was `abc689e96400ba6e96491d3e24c1ca0e82e355664087374937cb5119f6e437b0`. The test cold-started a five-lap Clio Cup Free Race with mandatory stops and used a checkpoint to continue the automated drive after the player's pit visit. The player entered service on lap two, returned to the road, and finished 20th in **17:09.13**. All 19 opponents completed service. The last opponent stopped on lap five. Race Results showed a finish time for every driver.
 
 The game wrote 772 autosave pages. The card passed the filesystem and ECC checks. A separate launch showed **Load Successful**, read 341 pages, and preserved the saved card byte for byte. The traces and captures are in `local/modding-preview-combined/qa-road-america-sunny-rebuilt-service/`, `qa-road-america-sunny-mandatory-finish/`, and `qa-road-america-sunny-road-classification-cold/`. The Rain test remains open.
+
+#### Verify Road America Rain pit service and classification
+
+The Windows 11 Direct3D 12 test selected Rain in the Clio Cup and ran five laps with mandatory pit stops. The game loaded `rain/TRACK.JPK` and `rain/DMA1.JPK`. The track archive SHA-256 was `59fe6f7d1323380211dcb9763b9e7789a6ab6604edc42521cdc5e9632f738cd1`. All sixteen stalls, the pit driving line, and both pit corridor edges passed the collision audit.
+
+Player One entered the pits on lap two, reached the service screen, and returned to the track on lap three. All 19 opponents reached the completed-service state. Race Results gave all 20 drivers finish times, including Player One in 20th with **18:22.22** and the leader with **13:54.54**. The game wrote 772 autosave pages. A cold launch displayed **Load Successful**, read 341 pages, and left the card byte-identical. The memory card passed the filesystem and ECC checks.
+
+Evidence is in `qa-road-america-wet-mandatory-grid/`, `qa-road-america-wet-mandatory-state/`, `qa-road-america-wet-classification-cold/`, and `qa-road-america-wet-save-verified/` under `local/modding-preview-combined/`.
 
 #### Verify Adelaide pit service and classification
 
