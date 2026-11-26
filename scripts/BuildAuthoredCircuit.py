@@ -16,6 +16,10 @@ from Ps2TrackRoute import EVENT, MAGIC, PIT_STALL_COUNT, POINT, SECTION, read_ro
 
 PIT_HALF_WIDTH = 3.4
 GRID_APPROACH_METRES = 176
+PIT_ROUTE_CLEARANCE_METRES = 98
+AI_MARGIN_TRANSITION_METRES = 55
+AI_ZONE_TRANSITION_METRES = 65
+AI_CORNER_MARKERS = (9, 18, 8)
 
 
 def unit(x, z):
@@ -114,6 +118,23 @@ class Circuit:
         self.distances = [d * scale for d in distances]
         self.stations = [i * self.length / math.ceil(self.length / 8)
                          for i in range(math.ceil(self.length / 8))]
+        self.ai_lane_margin = float(layout.get("ai_lane_margin_m", 0))
+        self.ai_lane_margin_zones = tuple((float(zone["from_m"]), float(zone["to_m"]), float(zone["margin_m"]))
+                                          for zone in layout.get("ai_lane_margin_zones", ()))
+        self.ai_corners = tuple((float(corner["approach_m"]), float(corner["apex_m"]), float(corner["exit_m"]))
+                                for corner in layout.get("ai_corners", ()))
+        previous_exit = 0.
+        for approach, apex, exit_ in sorted(self.ai_corners):
+            if not previous_exit < approach < apex < exit_ < self.length:
+                raise ValueError("AI corner markers must be ordered and corner ranges must not overlap")
+            previous_exit = exit_
+        # The largest inner lane offset is 46 percent of the paved half-width.
+        max_margin = self.width / 2 * 0.54
+        if any(not 0 <= start < end <= self.length for start, end, _ in self.ai_lane_margin_zones):
+            raise ValueError("AI margin zones need increasing distances inside the lap")
+        if (not 0 <= self.ai_lane_margin < max_margin
+                or any(not self.ai_lane_margin <= margin < max_margin for _, _, margin in self.ai_lane_margin_zones)):
+            raise ValueError("AI lane margins must keep the outer lanes outside the two inner lanes")
         self.validate()
 
     def position(self, distance):
@@ -132,6 +153,16 @@ class Circuit:
         x, z = self.position(distance)
         dx, dz = self.direction(distance)
         return x + dz * lateral, z - dx * lateral
+
+    def ai_outer_lane_margin(self, distance):
+        extra = 0.
+        for start, end, margin in self.ai_lane_margin_zones:
+            transition = min(1., max(0., (distance - start) / AI_ZONE_TRANSITION_METRES),
+                             max(0., (end - distance) / AI_ZONE_TRANSITION_METRES))
+            extra = max(extra, (margin - self.ai_lane_margin) * transition)
+        # Keep the full racing corridor near the shared pit approach and exit.
+        approach = min(distance, self.length - distance) - PIT_ROUTE_CLEARANCE_METRES
+        return (self.ai_lane_margin + extra) * min(1., max(0., approach / AI_MARGIN_TRANSITION_METRES))
 
     def validate(self):
         start_dx, start_dz = self.direction(0)
@@ -185,6 +216,12 @@ def build_route(circuit):
     }
     if len(markers) != 10:
         raise ValueError("Keep enough space between sector splits and the pit approach")
+    for corner in circuit.ai_corners:
+        for distance, code in zip(corner, AI_CORNER_MARKERS, strict=True):
+            station = round(distance * count / circuit.length)
+            if station >= count or station in markers:
+                raise ValueError(f"AI corner marker at {distance:g} m overlaps another route marker")
+            markers[station] = (code, 255, 0)
     main = [(d, 0., *markers.get(i, (0, 255, 0))) for i, d in enumerate(stations)]
     pit_markers = {-55: (5, 255, 0), -50: (14, 255, 0), 0: (6, 255, 0),
                    50: (15, 255, 0), 60: (11, 255, 0), 90: (3, 255, 0)}
@@ -199,8 +236,7 @@ def build_route(circuit):
     # Keep both placement lanes on the main road, including through bends.
     auxiliary = [(d, 0., 0, 1, 0) for d in stations[-grid_approach:] + stations[:boundary + 1]]
     half = circuit.width / 2
-    # The main route's outer lanes frame the drivable ribbon instead of collapsing onto its center.
-    # The pit entry tests lanes 0 and 1 as the two edges of the corridor; lane 2 is its center.
+    # The pit entry tests lanes 0 and 1 as the two edges of the corridor. Lane 2 is its center.
     groups = ((main, (-half, -half * 0.46, half * 0.32, 0, half), 0x1f, 1),
               (pit, (-PIT_HALF_WIDTH, PIT_HALF_WIDTH, 0, 2.8), 0x27, 0),
               (auxiliary, (-half / 3, half / 3), 3, 0))
@@ -213,7 +249,11 @@ def build_route(circuit):
             events.extend(EVENT.pack(dz, -dx, lap_distance, code, tag, argument, 0))
         for lane, offset in enumerate(offsets):
             for distance, lateral, *_ in rows:
-                edge = pit_inner_edge(distance, circuit.width) if mask == 0x27 and lane == 0 else lateral + offset
+                edge = lateral + offset
+                if loop and lane in (0, 4):
+                    edge -= math.copysign(circuit.ai_outer_lane_margin(distance), offset)
+                elif mask == 0x27 and lane == 0:
+                    edge = pit_inner_edge(distance, circuit.width)
                 points.extend(POINT.pack(*circuit.offset(distance, edge)))
     route = MAGIC + headers + events + points
     read_route(route)
@@ -337,7 +377,7 @@ def build(circuit, source, output, work, *, disc=None):
     events = event_catalog((source / "events.big").read_bytes(), (entry,), existing_rounds=14, add_oschersleben=False)
     route = preview(circuit, work)
     track, dma = build_packages((source / "TRACK.JPK").read_bytes(), (source / "DMA1.JPK").read_bytes(),
-                                work, route=route, markings=True)
+                                work, route=route, markings=True, textured=False)
     pack = work / "pack"
     for directory in ("", "tqa2", "tqa3", "tqa4") + (("rain",) if (source / "rain").is_dir() else ()):
         copy_circuit_files(source / directory, pack / directory)

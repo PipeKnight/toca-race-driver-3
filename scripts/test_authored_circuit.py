@@ -3,6 +3,7 @@
 import configparser
 import json
 import math
+import struct
 from pathlib import Path
 import tempfile
 import unittest
@@ -16,6 +17,7 @@ from BuildRoadAmericaMod import TrackEntry, read_bigf, repack_bigf, track_catalo
 from ImportRd2Car import variants
 from Ps2TrackCollision import read_triangles
 from Ps2TrackRoute import PIT_STALL_COUNT, read_route
+from Ps2TrackScene import Material, triangle_batch
 
 
 class AuthoredCircuitTests(unittest.TestCase):
@@ -94,6 +96,52 @@ class AuthoredCircuitTests(unittest.TestCase):
         for i, (_, _, distance, *_) in enumerate(auxiliary.events):
             self.assertLess(math.dist(auxiliary.lanes[0][i], circuit.offset(distance, -circuit.width / 6)), .001)
             self.assertLess(math.dist(auxiliary.lanes[1][i], circuit.offset(distance, circuit.width / 6)), .001)
+
+    def test_ai_margin_keeps_the_hairpin_lanes_inside_the_paved_ribbon(self):
+        layout = self.layout()
+        source = dict(layout, ai_lane_margin_m=0, ai_lane_margin_zones=())
+        old, pit, grid = read_route(build_route(Circuit(source)))
+        circuit = Circuit(layout)
+        main, new_pit, new_grid = read_route(build_route(circuit))
+        self.assertEqual((new_pit, new_grid), (pit, grid))
+        self.assertEqual(main.events, old.events)
+        self.assertEqual(main.lanes[1:4], old.lanes[1:4])
+        for target, margin in ((92, 0), (420, 1.25), (610, 2.75), (1215, 2.75)):
+            i = min(range(len(circuit.stations)), key=lambda i: abs(circuit.stations[i] - target))
+            for lane in (0, 4):
+                self.assertAlmostEqual(math.dist(old.lanes[lane][i], main.lanes[lane][i]), margin, places=3)
+        with self.assertRaisesRegex(ValueError, "outer lanes"):
+            Circuit(dict(layout, ai_lane_margin_m=4, ai_lane_margin_zones=()))
+
+    def test_ai_corner_markers_keep_the_timing_gates_and_pit_route(self):
+        layout = self.layout()
+        circuit = Circuit(layout)
+        main, pit, grid = read_route(build_route(circuit))
+        old, old_pit, old_grid = read_route(build_route(Circuit(dict(layout, ai_corners=()))))
+        self.assertEqual((pit, grid, main.lanes), (old_pit, old_grid, old.lanes))
+        markers = {11: 9, 26: 18, 42: 8, 64: 9, 76: 18, 89: 8,
+                   91: 9, 101: 18, 112: 8, 137: 9, 151: 18, 161: 8}
+        for i, (after, before) in enumerate(zip(main.events, old.events, strict=True)):
+            code = markers.get(i, before[3])
+            self.assertEqual(after, (*before[:3], code, *before[4:]))
+        with self.assertRaisesRegex(ValueError, "overlaps another route marker"):
+            build_route(Circuit(dict(layout, ai_corners=[{"approach_m": 1, "apex_m": 20, "exit_m": 40}])))
+
+    def test_solid_scene_batch_omits_the_inherited_texture_enable_bit(self):
+        prefix = bytearray(24)
+        gif = 16
+        textured_tag = (1 << 46) | (0x1c << 47) | 6
+        struct.pack_into("<Q", prefix, gif, textured_tag)
+        material = Material(0, 0, prefix, bytes([128, 128, 128, 0] * 3), 0, 0, 0, gif)
+        vertices = ((0, 0, 0), (1, 0, 0), (0, 0, 1))
+        bounds = ((0, 0, 0), (1, 0, 1))
+        colored = triangle_batch(material, vertices, *bounds, (135, 135, 148), textured=False)
+        textured = triangle_batch(material, vertices, *bounds, (135, 135, 148))
+        header = gif + 4  # FLUSHE precedes the original material prefix.
+        before, = struct.unpack_from("<Q", textured, header)
+        after, = struct.unpack_from("<Q", colored, header)
+        self.assertEqual(before ^ after, 1 << 51)
+        self.assertEqual(colored[header + 8:], textured[header + 8:])
 
     def test_preview_exports_upward_geometry_and_the_same_route(self):
         circuit = Circuit(self.layout())

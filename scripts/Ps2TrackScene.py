@@ -143,11 +143,13 @@ def scene_info(args):
             print(f"{root:#10x} {leaf:#14x} {distance:15.2f} m")
 
 
-def triangle_batch(material, vertices, low, high, rgb):
+def triangle_batch(material, vertices, low, high, rgb, *, textured=True):
     batch = bytearray(material.prefix)
     WORD.pack_into(batch, 8, TRIANGLE_VERTICES)
-    tag = read_word(batch, material.gif)
-    WORD.pack_into(batch, material.gif, (tag & ~0x7fff) | TRIANGLE_VERTICES)
+    tag, = struct.unpack_from("<Q", batch, material.gif)
+    if not textured:
+        tag &= ~(1 << (47 + 4))  # Clear TME in the GIF tag's PRIM field.
+    struct.pack_into("<Q", batch, material.gif, (tag & ~0x7fff) | TRIANGLE_VERTICES)
     uv = bytearray()
     for x, _, z in vertices:
         s = (x - low[0]) / (high[0] - low[0]) if high[0] != low[0] else 0
@@ -164,7 +166,7 @@ def triangle_batch(material, vertices, low, high, rgb):
     return batch + bytes(-len(batch) % 16)
 
 
-def scene_append(args):
+def scene_append(args, *, textured=True):
     scene = Scene(args.input.read_bytes())
     if args.root not in scene.roots or args.leaf not in scene.leaves(args.root):
         raise ValueError("Material leaf is not in the selected scene root")
@@ -186,7 +188,7 @@ def scene_append(args):
         points = tuple(vertices[index] for index in face)
         if len(set(points)) != 3:
             raise ValueError("An OBJ face repeats a vertex")
-        packet.extend(triangle_batch(material, points, low, high, args.rgb))
+        packet.extend(triangle_batch(material, points, low, high, args.rgb, textured=textured))
         if len(packet) // 16 > 0xffff:
             raise ValueError("The authored mesh exceeds a single PS2 DMA leaf")
     packet_at = scene.size

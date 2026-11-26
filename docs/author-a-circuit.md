@@ -2,7 +2,7 @@
 
 The authored Tsukuba Circuit example is a 2,045 m recreation of the Course 2000 layout. Its centerline, road, markings, run-off, pit ribbon, collision, and race route are generated from source in this repository. It is a flat approximation with a simple perimeter barrier around the run-off. Buildings, kerbs, elevation, and a custom loading screen remain available for future authoring. The source includes no geometry, textures, or map images from a third-party game.
 
-The authoring tool uses a local Foundry Oval pack as a base. It retains the original runtime's sunny material, weather, and loading resources from that workflow. It does not put either game's files in Git. Build the pack on your machine using your own supported discs.
+The authoring tool uses a local Foundry Oval pack as a base. It uses the base pack’s sunny weather and loading resources. The authored road, markings, and ground use the vertex colors supplied by the builder. It does not put either game's files in Git. Build the pack on your machine using your own supported discs.
 
 ## Build and run Tsukuba
 
@@ -30,6 +30,16 @@ The camera file places fixed panning cameras along both sides of the circuit. Th
 
 The Windows Direct3D 12 Tsukuba test loaded all 19 generated camera positions. After the one-lap Free Race, **View Replay** switched from a fixed view of the grid to trackside views of the straight and the bends. The pack was built from `tracks/tsukuba.json` and the test used the replay-camera runner. Captures are in `local/modding-preview-combined/qa-tsukuba-authored-camera-replay/`.
 
+### Verify the third hairpin and its replay color
+
+The original 20-car replay reached **13.09 m** from the centerline in the third hairpin. The road is 12 m wide. A separate full race with only the outer-lane margins still reproduced the overshoot when the player kept pace with traffic. The layout combines the inboard outer lanes and the approach, apex, and exit markers found on stock circuits.
+
+In a Windows 11 Direct3D 12 Free Race with virtual pad input, all 20 Clio Cup cars were classified and the game autosaved. The leader finished in **1:15.16** and Player One in **1:30.16**. The game loaded all 19 cameras and played the lap back through trackside views. Across the 19 AI cars, the third hairpin's largest measured center offset was **3.96 m** in the race and **3.97 m** in the replay. The corners of a 4.0 × 1.9 m envelope aligned to each car's measured heading stayed within 5.32 m of the centerline at the sampled positions, inside the 6 m paved half-width. The second hairpin also passed the test. The first hairpin and the kink at about 840 m still show excursions; their measured replay center offsets reached 16.08 m and 7.03 m.
+
+The test pack's `tqa5/osc1.ail` SHA-256 was `a96d88a8da11ae7c7ca247d243bebbd4226d72e5be3748232f1bb517034b550f`. Its `tqa5/DMA1.JPK` SHA-256 was `15559385b0d24ec85ee05ad7362296061266f551deb4329f219f3a53cd2076d1`. The logs and captures are in `local/modding-preview-combined/qa-tsukuba-corners-clearance-*/`.
+
+The software GS trace for the reported trackside shot showed the authored road draw change the sampled pixel from terrain to the road surface. The road’s vertex color was RGB `135,135,148`. The inherited texture changed the output to `108,126,75`. Disabling texture sampling on the authored draws restored the original RGB at the same pixel with the same camera, geometry, and car positions. The builder now generates these draws using solid vertex colors. The local pixel traces are in `local/modding-preview-combined/qa-tsukuba-green-pixel-270,265*/`.
+
 ## Design your own layout
 
 1. Copy `tracks/tsukuba.json` to a new file. Use a printable ASCII `name` of up to 48 characters. Use `centerline` as a list of 8–256 `[x, z]` pairs in driving order (Y is height in the game). Prefer metres. The first anchor is start/finish; the tool closes the loop, so do not repeat the first point. A default flat height of 12 m can be changed with `height_m`.
@@ -44,6 +54,10 @@ The Windows Direct3D 12 Tsukuba test loaded all 19 generated camera positions. A
    ```
 
 5. Keep the JSON as the source of truth for the high-level tool. Editing an exported OBJ alone does not change the next build. To make a more detailed scene, use the [scene and collision authoring commands](modding.md#tracks) on a separate development copy and update collision and route whenever a driving surface moves. Rebuild the course against the original local templates; do not distribute the generated archives.
+
+Use `ai_lane_margin_m` to move the outer AI lanes in from each paved edge. The margin tapers to zero at the pit approach and exit. An `ai_lane_margin_zones` entry with `from_m`, `to_m`, and `margin_m` can provide more clearance in a tight turn. The distances are measured from start/finish. The outer AI lanes must stay outside the inner lanes.
+
+For a tight corner, add an `ai_corners` entry with `approach_m`, `apex_m`, and `exit_m`. The builder places the original game’s corner markers at the nearest main-route stations. Place the approach marker before turn-in and use stations clear of timing, grid, and pit markers. Verify the turn in a full race with traffic. Tsukuba’s third hairpin uses the 1,094 m, 1,205 m, and 1,285 m markers.
 
 The builder authors one extra circuit per pack in `tqa5`. The flat road and run-off share one collision surface, and the optional perimeter uses a separate barrier material. The game applies its route-based lap rules. A run-off surface with different grip, kerbs, and a banked or graded road need additional collision authoring. The catalog declares the generated pit lane on the right, as seen from a car traveling in race direction.
 

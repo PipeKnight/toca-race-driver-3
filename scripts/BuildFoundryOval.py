@@ -106,7 +106,7 @@ def build_geometry(work):
               ((i, i+1, i+columns+1, i+columns) for i in range(len(ground)-columns) if i % columns != columns-1))
 
 
-def build_packages(track, dma, work, *, route=None, markings=False):
+def build_packages(track, dma, work, *, route=None, markings=False, textured=True):
     if route is None:
         build_geometry(work)
         route = build_route()
@@ -120,18 +120,18 @@ def build_packages(track, dma, work, *, route=None, markings=False):
     scene = work / "ground.dma"
     # The unmodified Sunny Road America package supplies the local texture and shading state.
     scene_append(SimpleNamespace(command="scene-replace", input=original_scene, output=scene, obj=work / "ground.obj",
-                                 root=0x2284, leaf=0x95910, rgb=(88, 125, 95), offset_y=0))
+                                 root=0x2284, leaf=0x95910, rgb=(88, 125, 95), offset_y=0), textured=textured)
     ground = Scene(scene.read_bytes())
     root, = ground.roots
     leaf, = ground.leaves(root)
     finished = work / "oval.dma"
     scene_append(SimpleNamespace(command="scene-append", input=scene, output=finished, obj=work / "road.obj",
-                                  root=root, leaf=leaf, rgb=(135, 135, 148), offset_y=0.017))
+                                  root=root, leaf=leaf, rgb=(135, 135, 148), offset_y=0.017), textured=textured)
     if markings:
         marked = work / "marked.dma"
         scene_append(SimpleNamespace(command="scene-append", input=finished, output=marked,
                                      obj=work / "markings.obj", root=root, leaf=leaf,
-                                     rgb=(230, 230, 230), offset_y=0.027))
+                                     rgb=(230, 230, 230), offset_y=0.027), textured=textured)
         finished = marked
     collision_data = collision.read_bytes()
     perimeter = work / "perimeter.obj"
@@ -141,7 +141,7 @@ def build_packages(track, dma, work, *, route=None, markings=False):
         collision_data = bytes(append_triangles(Collision(collision_data), vertices, faces, 9))
         bounded = work / "bounded.dma"
         scene_append(SimpleNamespace(command="scene-append", input=finished, output=bounded,
-                                     obj=perimeter, root=root, leaf=leaf, rgb=(125, 128, 130), offset_y=0))
+                                     obj=perimeter, root=root, leaf=leaf, rgb=(125, 128, 130), offset_y=0), textured=textured)
         finished = bounded
     track = replace_member(track, ["osc1.big", "osc1.ail"], route)
     track = replace_member(track, ["col.col"], collision_data)

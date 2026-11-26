@@ -2,6 +2,19 @@
   "name": "Tsukuba Circuit",
   "length_m": 2045,
   "road_width_m": 12,
+  "ai_lane_margin_m": 1.25,
+  "ai_lane_margin_zones": [
+    {"from_m": 133, "to_m": 380, "margin_m": 2.75},
+    {"from_m": 515, "to_m": 750, "margin_m": 2.75},
+    {"from_m": 740, "to_m": 945, "margin_m": 2.75},
+    {"from_m": 1110, "to_m": 1350, "margin_m": 2.75}
+  ],
+  "ai_corners": [
+    {"approach_m": 91, "apex_m": 204, "exit_m": 338},
+    {"approach_m": 510, "apex_m": 609, "exit_m": 711},
+    {"approach_m": 730, "apex_m": 806, "exit_m": 895},
+    {"approach_m": 1094, "apex_m": 1205, "exit_m": 1285}
+  ],
   "perimeter_wall_m": 1.8,
   "sectors": [0.326, 0.695],
   "centerline": [
