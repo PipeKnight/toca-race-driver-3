@@ -38,6 +38,10 @@ In a Windows 11 Direct3D 12 Free Race with virtual pad input, all 20 Clio Cup ca
 
 The test pack's `tqa5/osc1.ail` SHA-256 was `a96d88a8da11ae7c7ca247d243bebbd4226d72e5be3748232f1bb517034b550f`. Its `tqa5/DMA1.JPK` SHA-256 was `15559385b0d24ec85ee05ad7362296061266f551deb4329f219f3a53cd2076d1`. The logs and captures are in `local/modding-preview-combined/qa-tsukuba-corners-clearance-*/`.
 
+The same route and scene also completed a five-lap Free Race with mandatory pit stops. Player One serviced on lap two and finished sixth in **6:35.30**. The pit trace recorded completed service for all 19 opponents. All 20 drivers had a classified time, including one opponent with a 20-second driving penalty. The game cold-loaded the autosave without changing its bytes. The card passed the filesystem and ECC checks. See `local/modding-preview-combined/qa-tsukuba-ai-turns-mandatory-*/`.
+
+An experimental inboard line reduced the kink's peak center offset from 7.02 m to 6.30 m at one player pace and from 9.35 m to 7.98 m at another. The tires still crossed the 6 m edge in both cases. Moving the first hairpin line inward earlier also shifted some excursions from the outside to the inside of the corner. These experiments remained outside the verified build.
+
 The software GS trace for the reported trackside shot showed the authored road draw change the sampled pixel from terrain to the road surface. The road’s vertex color was RGB `135,135,148`. The inherited texture changed the output to `108,126,75`. Disabling texture sampling on the authored draws restored the original RGB at the same pixel with the same camera, geometry, and car positions. The builder now generates these draws using solid vertex colors. The local pixel traces are in `local/modding-preview-combined/qa-tsukuba-green-pixel-270,265*/`.
 
 ## Design your own layout
