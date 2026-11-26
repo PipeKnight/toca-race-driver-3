@@ -24,7 +24,11 @@ python scripts/BuildAuthoredCircuit.py build tracks/tsukuba.json "$work\four-cou
 & $launcher --disc $rd3Iso --road-america "$work\tsukuba-pack" --data-dir "$work\player"
 ```
 
-The output adds `tqa5/TRACK.JPK`, `tqa5/DMA1.JPK`, the `tqa5` track record (index 54), and one sunny round to the Autosport Clio Cup event list. With `--disc`, it also generates selector icons for all five added courses using the stock atlas. The four other tracks and Road America Rain, if present, keep their existing packages. Select **Simulation Modes → Free Race → Touring Car → Autosport Clio Cup**, then **Tsukuba Circuit** in the track carousel. Select the same series in **Time Trial** for lap and ghost checks. Use an unlocked profile if the event does not appear, and keep the same isolated data directory for subsequent launches.
+The output adds `tqa5/TRACK.JPK`, `tqa5/DMA1.JPK`, `tqa5/replay-cameras.ini`, the `tqa5` track record (index 54), and one sunny round to the Autosport Clio Cup event list. With `--disc`, it also generates selector icons for all five added courses using the stock atlas. The four other tracks and Road America Rain, if present, keep their existing packages. Select **Simulation Modes → Free Race → Touring Car → Autosport Clio Cup**, then **Tsukuba Circuit** in the track carousel. Select the same series in **Time Trial** for lap and ghost checks. Use an unlocked profile if the event does not appear, and keep the same isolated data directory for subsequent launches.
+
+The camera file places fixed panning cameras along both sides of the circuit. The first camera is available on the starting grid. The replay director changes cameras when the followed car crosses an activation zone. To adjust a shot, edit its `fPosition` and unit-length `fDirection` coordinates in the generated file. Each `Activation_Zone` section links its four X/Z vertices to a camera by index. Finish a race and open **View Replay** with a runner that supports camera files to verify the framing in motion.
+
+The Windows Direct3D 12 Tsukuba test loaded all 19 generated camera positions. After the one-lap Free Race, **View Replay** switched from a fixed view of the grid to trackside views of the straight and the bends. The pack was built from `tracks/tsukuba.json` and the test used the replay-camera runner. Captures are in `local/modding-preview-combined/qa-tsukuba-authored-camera-replay/`.
 
 ## Design your own layout
 

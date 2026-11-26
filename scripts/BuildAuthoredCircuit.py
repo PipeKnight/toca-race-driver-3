@@ -220,6 +220,46 @@ def build_route(circuit):
     return route
 
 
+def build_replay_cameras(circuit):
+    count = math.ceil(circuit.length / 110)
+    width = circuit.width / 2
+    lines = []
+    for index in range(count):
+        distance = index * circuit.length / count
+        # Frame the incoming cars from outside the racing and pit lanes.
+        lateral = -(width + 10) if index % 2 == 0 else width + 10
+        x, z = circuit.offset(distance + 18, lateral)
+        target_x, target_z = circuit.position(distance - 12)
+        dx, dy, dz = target_x - x, -3.5, target_z - z
+        length = math.hypot(dx, dy, dz)
+        lines.extend((
+            f"[Camera_{index:03}]",
+            f"fPositionx={x:.6f}", f"fPositiony={circuit.height + 5:.6f}", f"fPositionz={z:.6f}",
+            f"fDirectionx={dx / length:.6f}", f"fDirectiony={dy / length:.6f}", f"fDirectionz={dz / length:.6f}",
+            "boPanning=TRUE", "boTracking=FALSE", "boSimulatedHuman=FALSE", "boZooming=FALSE",
+            "boCloseFollow=FALSE", "boIgnoreRoll=TRUE", "boIgnoreRotation=FALSE", "boBlackOut=FALSE",
+            f"boRaceStart={'TRUE' if index == 0 else 'FALSE'}", "boUseLimits=FALSE",
+            "fLeftLimit=-6.283185", "fRightLimit=6.283185", "fPitchOffset=0.000000",
+            "fZoom=1.000000", "fZoomInOnCarAmount=0.000000", "fWobble=0.000000", "",
+            f"[Activation_Zone_{index:03}]", "uNumCameras=1", f"uCamera000={index}",
+            "nCamera000path=-1", "fCamera000selectionprobability=1.000000", "uNumVertices=4",
+        ))
+        # Short zones across the road let the director switch once per approach.
+        center_x, center_z = circuit.position(distance)
+        forward_x, forward_z = circuit.direction(distance)
+        corners = ((-8, -1), (8, -1), (8, 1), (-8, 1))
+        for vertex, (longitudinal, side) in enumerate(corners):
+            across = side * (width + 1)
+            vx = center_x + forward_x * longitudinal + forward_z * across
+            vz = center_z + forward_z * longitudinal - forward_x * across
+            lines.extend((f"fVertex{vertex:03}x={vx:.6f}", f"fVertex{vertex:03}z={vz:.6f}"))
+        lines.append("")
+    lines.extend(("[Cameras]", f"uNumCameras={count}", "", "[Paths]", "uNumPaths=0", "",
+                  "[Activation_Zones]", f"uNumActivationZones={count}", "", "[CameraDirector]",
+                  "uFileFormatRevision=1", "fFileFormatVersion=1.000000", ""))
+    return "\r\n".join(lines).encode("ascii")
+
+
 def build_geometry(circuit, work):
     half = circuit.width / 2
 
@@ -306,6 +346,7 @@ def build(circuit, source, output, work, *, disc=None):
     (pack / entry.slot).mkdir()
     (pack / entry.slot / "TRACK.JPK").write_bytes(track)
     (pack / entry.slot / "DMA1.JPK").write_bytes(dma)
+    (pack / entry.slot / "replay-cameras.ini").write_bytes(build_replay_cameras(circuit))
     if disc is not None:
         (pack / "TS_RCCUF.LZS").write_bytes(build_icons(disc, pack))
     pack.rename(output)

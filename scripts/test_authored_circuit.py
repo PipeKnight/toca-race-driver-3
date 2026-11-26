@@ -1,5 +1,6 @@
 """Regression checks for original circuits and the RD2 import front end."""
 
+import configparser
 import json
 import math
 from pathlib import Path
@@ -7,7 +8,7 @@ import tempfile
 import unittest
 
 from BuildAuthoredCircuit import (
-    GRID_APPROACH_METRES, PIT_HALF_WIDTH, Circuit, build_route, edges_touch, pit_inner_edge, pit_offset,
+    GRID_APPROACH_METRES, PIT_HALF_WIDTH, Circuit, build_replay_cameras, build_route, edges_touch, pit_inner_edge, pit_offset,
     preview, validate_ribbon,
 )
 from BuildFoundryOval import copy_circuit_files
@@ -32,6 +33,25 @@ class AuthoredCircuitTests(unittest.TestCase):
             target = Path(temporary) / "target"
             copy_circuit_files(source, target)
             self.assertEqual((target / "replay-cameras.ini").read_bytes(), camera)
+
+    def test_generated_replay_zones_reference_trackside_cameras(self):
+        circuit = Circuit(self.layout())
+        config = configparser.ConfigParser()
+        config.read_string(build_replay_cameras(circuit).decode("ascii"))
+        count = config.getint("Cameras", "uNumCameras")
+        self.assertEqual(count, config.getint("Activation_Zones", "uNumActivationZones"))
+        for i in range(count):
+            with self.subTest(camera=i):
+                section = config[f"Camera_{i:03}"]
+                self.assertIs(section.getboolean("boRaceStart"), i == 0)
+                self.assertAlmostEqual(math.hypot(*(section.getfloat(f"fDirection{axis}") for axis in "xyz")),
+                                       1., places=5)
+                zone = config[f"Activation_Zone_{i:03}"]
+                self.assertEqual(zone.getint("uCamera000"), i)
+                self.assertEqual(zone.getint("uNumVertices"), 4)
+                x = sum(zone.getfloat(f"fVertex{j:03}x") for j in range(4)) / 4
+                z = sum(zone.getfloat(f"fVertex{j:03}z") for j in range(4)) / 4
+                self.assertLess(math.dist((x, z), circuit.position(i * circuit.length / count)), 1.)
 
     def test_route_contains_ordered_ghost_splits_and_independent_pit_lane(self):
         circuit = Circuit(self.layout())
