@@ -9,7 +9,8 @@ import unittest
 from unittest.mock import patch
 
 from BuildRoadAmericaMod import (
-    convert_pit, convert_replay_cameras, convert_route, pit_distances, road_america_weather, route_counts,
+    adelaide_pit_entry, convert_pit, convert_replay_cameras, convert_route, pit_distances, road_america_weather,
+    route_counts,
 )
 from ImportRd2Car import discover_mechanics
 from ImportRd2Track import check_ground, check_ground_segments
@@ -26,6 +27,21 @@ def archive(names):
 
 
 class Rd2AssetCatalogTests(unittest.TestCase):
+    def test_adelaide_entry_preserves_driving_lines_and_timing(self):
+        events = [(255, 0, 0, float(i)) for i in range(69)]
+        events[9] = (255, 0, 5, 9.)
+        events[15] = (255, 0, 14, 15.)
+        events[18] = (0, 1, 3, 18.)
+        lanes = tuple(tuple((float(i), float(z)) for i in range(69)) for z in (0, 2, 1, 4))
+        expanded, updated = adelaide_pit_entry(lanes, events)
+        self.assertEqual([updated[i][2] for i in (5, 6, 9, 15, 18)], [5, 14, 0, 0, 3])
+        self.assertEqual([event[3] for event in updated], [event[3] for event in events])
+        self.assertEqual(expanded[0][:10], [(float(i), -3.) for i in range(10)])
+        self.assertEqual(expanded[1][:10], [(float(i), 5.) for i in range(10)])
+        self.assertEqual(tuple(expanded[0][10:]), lanes[0][10:])
+        self.assertEqual(expanded[2:], lanes[2:])
+        self.assertEqual(adelaide_pit_entry(lanes, updated), (lanes, updated))
+
     def test_replay_camera_conversion_supplies_missing_rd3_fields(self):
         source = (b"[Camera_001]\r\nfPositionx=34.0\r\n\r\n"
                   b"[Camera_002]\r\nfPitchOffset=0.250000\r\nboblackout=TRUE\r\n\r\n"

@@ -63,7 +63,7 @@ def build(donor, reference, layout, code, scene_number, output, name=None):
         raise ValueError(f"Scene number for {code} must be between 1 and {len(choices)}")
     scene = choices[index - 1]
     aid = choose_route(donor, code, layout["routes"], scene)
-    route = convert_route(aid)
+    route = convert_route(aid, layout=code)
     catalog, entry = describe_slot(reference, code, route, name)
     original = read_disc_range(reference, 1, TRACK_SECTOR, TRACK_BYTES)
     original_scene = read_disc_range(reference, 1, DMA_SECTOR, DMA_BYTES)

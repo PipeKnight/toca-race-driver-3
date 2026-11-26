@@ -294,7 +294,34 @@ def pit_distances(lanes, events, lap_length):
             for (tag, argument, code, _), distance in zip(events, distances, strict=True)]
 
 
-def convert_route(source, counts=None):
+def adelaide_pit_entry(lanes, events):
+    # Adelaide's approach turns sharply before RD2's first pit gate.
+    # Use the tested approach only when the gate and service markers match.
+    old_gate, old_limit = 9, 15
+    new_gate, new_limit = 5, 6
+    stations = (new_gate, new_limit, old_gate, old_limit)
+    if len(events) != 69 or tuple(events[i][:3] for i in stations) != (
+            (255, 0, 0), (255, 0, 0), (255, 0, 5), (255, 0, 14)):
+        return lanes, events
+    left, right, driving, stalls = lanes
+    left, right = list(left), list(right)
+    for i in range(old_gate + 1):
+        ax, az = left[i]
+        bx, bz = right[i]
+        dx, dz = bx - ax, bz - az
+        width = math.hypot(dx, dz)
+        if 0.01 <= width < 8.:
+            extension = (8. - width) / (2 * width)
+            left[i] = ax - extension * dx, az - extension * dz
+            right[i] = bx + extension * dx, bz + extension * dz
+    updated = list(events)
+    for i, code in zip(stations, (5, 14, 0, 0), strict=True):
+        tag, argument, _, distance = events[i]
+        updated[i] = tag, argument, code, distance
+    return (left, right, driving, stalls), updated
+
+
+def convert_route(source, counts=None, *, layout=None):
     main_count, pit_count, aux_count = route_counts(source) if counts is None else counts
     if source[:6] != bytes.fromhex("060d01200005") or struct.unpack_from("<H", source, 6)[0] != main_count:
         raise ValueError("Unexpected donor route header")
@@ -329,6 +356,9 @@ def convert_route(source, counts=None):
     lap_length = main_events[0][3]
     pit, pit_events = convert_pit(pit, pit_events, lap_length)
     pit_events = pit_distances(pit, pit_events, lap_length)
+    pit_points = pit
+    if layout == "ade" and (main_count, aux_count) == (283, 30):
+        pit_points, pit_events = adelaide_pit_entry(pit, pit_events)
     sections = ((main, main_events, 0x1F, 1), (pit, pit_events, 0x27, 0),
                 (auxiliary, aux_events, 3, 0))
 
@@ -351,7 +381,8 @@ def convert_route(source, counts=None):
                 raise ValueError("Invalid donor route coordinate")
             flags = (0, 1, 0, 0) if group == 2 else (code, tag & 255, argument, 0)
             events.extend(struct.pack("<3f4B", dx / width, dz / width, distance, *flags))
-        for line in coordinates:
+        # The symmetric pit expansion keeps the original gate normals.
+        for line in pit_points if group == 1 else coordinates:
             for point in line:
                 lanes.extend(struct.pack("<2f", *point))
     return header + events + lanes
