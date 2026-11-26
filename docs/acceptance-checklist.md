@@ -143,7 +143,7 @@ The Windows Direct3D 12 Oschersleben steering replay captured neutral, full left
 
 | Circuit pack | Windows evidence and open checks |
 | --- | --- |
-| Road America Sunny | Free Race and a cold-loaded Time Trial ghost verified. The rebuilt pit driving line and stalls pass the collision audit. Pit service stays open. |
+| Road America Sunny | Free Race and a cold-loaded Time Trial ghost verified. A five-lap mandatory-stop test serviced the player and all 19 opponents and classified all 20 drivers. Player One finished in **17:09.13**. The autosave passed filesystem and ECC checks and cold-loaded without writes. [Road America pit verification](race-driver-2-import.md#verify-road-america-sunny-pit-service-and-classification) |
 | Road America Rain | Free Race finish and cold save load verified. The rebuilt wet pit driving line and stalls pass the collision audit. Wet pit service and a Rain-specific ghost stay open. |
 | A1-Ring GP and Short | Five-lap mandatory-stop races classified all 20 drivers on each layout. The player pitted on lap two and finished in **12:40.33** on GP and **7:08.30** on Short. Both cards passed filesystem and ECC checks and cold-loaded without writes. Sampled route and stall collision passed, and both layouts also have cold-loaded Time Trial ghosts. [A1-Ring pit verification](race-driver-2-import.md#verify-a1-ring-pit-service-and-classification) |
 | Foundry Oval | Classified finish, autosave, and cold-loaded ghost verified. Sampled route collision passes. Pit service stays open. |
