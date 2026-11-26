@@ -1,0 +1,17 @@
+--- a/runtime/src/disc.cpp
++++ b/runtime/src/disc.cpp
+@@ -917,7 +917,13 @@
+         if (selected || id == "OSC1") {
+             const auto suffix = name.substr(12);
+             if (suffix.starts_with("SUN\\") || suffix.starts_with("RAI\\")) {
+-                const auto member = suffix.substr(4);
++                auto member = suffix.substr(4);
++                if (selected && (member == "DMA.JPK" || member == "DMA2.JPK")) {
++                    // The archive lookup uses a 128-byte path buffer. Route the
++                    // other detail levels to the imported geometry in DMA1.JPK.
++                    std::memcpy(g_ram + address + 16, "DMA1.JPK", sizeof("DMA1.JPK"));
++                    member = "DMA1.JPK";
++                }
+                 const auto &resources = road_america_rain_members;
+                 const auto it = std::find_if(resources.begin(), resources.end(),
+                                              [member](const auto &resource) { return member == resource.name; });

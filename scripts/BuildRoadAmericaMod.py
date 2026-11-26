@@ -110,31 +110,93 @@ def track_catalog(original, courses=(ROAD_AMERICA,), *, existing=80):
     return repack_bigf(original, members, base, max(base, 0x800), 0x4300)
 
 
+EVENT_TOTAL = re.compile(rb"(?mi)^(RacesNum[ \t]*=[ \t]*)(\d+)(?=[ \t]*\r?$)")
+EVENT_ROUND = re.compile(rb"(?ms)^\[Race (\d+)\]\r?\n(.*?)(?=^\[|\Z)")
+EVENT_TRACK = re.compile(rb"(?mi)^(TrackID[ \t]*=[ \t]*)([a-z0-9_]+)")
+CUSTOM_EVENT = re.compile(rb"(?mi)^RaceType[ \t]*=[ \t]*CUSTOM[ \t]*\r?$")
+EVENT_WEATHER = re.compile(rb"(?mi)^Weather(?:Prob)?[12][ \t]*=[^\r\n]*\r?\n?")
+INI_FORMATTING = re.compile(rb"(?m)^[ \t]*\r?\n|^([A-Za-z][A-Za-z0-9_]*?)[ \t]+=[ \t]*")
+
+
+def add_event_rounds(event, tracks, rainy_slots):
+    total = EVENT_TOTAL.search(event)
+    rounds = list(EVENT_ROUND.finditer(event))
+    if not total or [int(round_[1]) for round_ in rounds] != list(range(1, len(rounds) + 1)):
+        raise ValueError("Unexpected event calendar")
+    count = int(total[2])
+    if not 0 < count <= len(rounds):
+        raise ValueError("Invalid active round count in event calendar")
+    references = [EVENT_TRACK.search(round_[2]) for round_ in rounds[:count]]
+    if any(reference is None for reference in references):
+        raise ValueError("An active round has no TrackID")
+    track_ids = {reference[2].lower() for reference in references}
+    additions = [track for track in tracks if track not in track_ids]
+    if not additions:
+        return event
+
+    template = rounds[0][2]
+    source = EVENT_WEATHER.sub(b"", template)
+    # Keep the event's rules, scoring, vehicle class and race start procedure.
+    source = b"\r\n".join(line.strip().replace(b" = ", b"=", 1)
+                          for line in source.splitlines() if line.strip())
+    generated = []
+    for index, track in enumerate(additions, count + 1):
+        body = EVENT_TRACK.sub(lambda match: b"TrackID=" + track, source, count=1)
+        weather = (b"Weather1=Sunny\r\nWeatherProb1=90\r\nWeather2=Rain\r\nWeatherProb2=10"
+                   if track in rainy_slots else b"Weather1=Sunny\r\nWeatherProb1=100")
+        generated.append(f"[Race {index}]\r\n".encode("ascii") + body + b"\r\n" + weather + b"\r\n\r\n")
+
+    # Some stock files define extra numbered rounds beyond RacesNum. Move their
+    # section numbers so they stay inactive, while keeping all their settings.
+    insert_at = rounds[count - 1].end()
+    tail = re.sub(rb"(?m)^\[Race (\d+)\]", lambda m: f"[Race {int(m[1]) + len(additions)}]".encode("ascii"),
+                  event[insert_at:])
+    head = event[:insert_at].rstrip(b"\r\n\0")
+    head = EVENT_TOTAL.sub(lambda m: m[1] + str(count + len(additions)).encode("ascii"), head, count=1)
+    return head + b"\r\n\r\n" + b"".join(generated) + tail
+
+
 def event_catalog(original, courses=(ROAD_AMERICA,), *, existing_rounds=9, add_oschersleben=True,
                   rainy_slots=(b"osc1", b"tqa1")):
     members, base = read_bigf(original, 204)
-    event = members[b"rccuf.ini"]
-    number = re.compile(rb"(?mi)^RacesNum([ \t]*=[ \t]*)(\d+)(?=[ \t]*\r?$)")
-    total = number.search(event)
-    template = re.search(rb"(?ms)^\[Race 1\]\r?\n(.*?)(?=\r?\n\[)", event)
-    if not template or not total or int(total[2]) != existing_rounds:
+    clio = members[b"rccuf.ini"]
+    total = EVENT_TOTAL.search(clio)
+    if not total or int(total[2]) != existing_rounds:
         raise ValueError("Unexpected Clio Cup Free Race calendar")
-    source = template[1].rstrip(b"\r\n")
-    rounds = []
-    stock = (b"osc1",) if add_oschersleben else ()
-    tracks = stock + tuple(course.slot.encode("ascii") for course in courses)
-    for number_value, track in enumerate(tracks, existing_rounds + 1):
-        body, replacements = re.subn(rb"(?mi)^(TrackID[ \t]*=[ \t]*)hoc3", rb"\g<1>" + track, source)
-        if replacements != 1:
-            raise ValueError("Unexpected Clio Cup track reference")
-        if track not in rainy_slots:
-            body = re.sub(rb"(?mi)^Weather2[^\r\n]*\r?\n|^WeatherProb2[^\r\n]*\r?\n", b"", body)
-            body = re.sub(rb"(?mi)^(WeatherProb1[ \t]*=[ \t]*)90", rb"\g<1>100", body)
-        rounds.append(f"[Race {number_value}]\r\n".encode("ascii") + body)
-    updated = number.sub(lambda match: b"RacesNum" + match[1] + str(existing_rounds + len(tracks)).encode("ascii"),
-                         event, count=1).rstrip(b"\r\n\0")
-    members[b"rccuf.ini"] = updated + b"\r\n\r\n" + b"\r\n\r\n".join(rounds) + b"\r\n"
-    return repack_bigf(original, members, base, (base + 31) & ~31, len(original))
+
+    # The combined pack can build on older packs that listed their added
+    # layouts only in the Clio calendar. Promote those layouts as well.
+    inherited = []
+    rain = set(rainy_slots)
+    for round_ in list(EVENT_ROUND.finditer(clio))[9:existing_rounds]:
+        track = EVENT_TRACK.search(round_[2])[2].lower()
+        if track == b"osc1":
+            continue
+        inherited.append(track)
+        rain.discard(track)
+        if re.search(rb"(?mi)^Weather2[ \t]*=[ \t]*Rain[ \t]*\r?$", round_[2]):
+            rain.add(track)
+    tracks = tuple(dict.fromkeys((*inherited, *(course.slot.encode("ascii") for course in courses))))
+
+    changed = []
+    for name, event in members.items():
+        if name == b"rccuf.ini":
+            members[name] = add_event_rounds(event, ((b"osc1",) if add_oschersleben else ()) + tracks, rain)
+        elif CUSTOM_EVENT.search(event):
+            try:
+                members[name] = add_event_rounds(event, tracks, rain)
+            except ValueError as error:
+                raise ValueError(f"{name.decode('ascii')}: {error}") from error
+        if members[name] != event:
+            changed.append(name)
+
+    start = (base + 31) & ~31
+    if start + sum((len(data) + 31) & ~31 for data in members.values()) > len(original):
+        # Recover padding inside the edited INIs to stay within the original
+        # disc read. Keep inactive events and all configuration values intact.
+        for name in changed:
+            members[name] = INI_FORMATTING.sub(lambda m: m[1] + b"=" if m[1] else b"", members[name])
+    return repack_bigf(original, members, base, start, len(original))
 
 
 def road_america_weather(disc, scenes, sunny_number=None, rain_number=None):
@@ -321,6 +383,20 @@ def adelaide_pit_entry(lanes, events):
     return (left, right, driving, stalls), updated
 
 
+def a1_short_pit_stall_order(events):
+    # Put the first regular team stall before the pit timing line. On a late
+    # stop, a car taking stall 3 after that line can receive the assignment
+    # but drive straight through without service.
+    indices = (39, 40, 41, 42, 44)
+    if len(events) != 109 or tuple(events[i][:3] for i in indices) != (
+            (2, 1, 3), (2, 0, 4), (255, 0, 6), (3, 1, 3), (3, 0, 4)):
+        return events
+    updated = list(events)
+    for i, tag in ((39, 3), (40, 3), (42, 2), (44, 2)):
+        updated[i] = tag, *updated[i][1:]
+    return updated
+
+
 def convert_route(source, counts=None, *, layout=None):
     main_count, pit_count, aux_count = route_counts(source) if counts is None else counts
     if source[:6] != bytes.fromhex("060d01200005") or struct.unpack_from("<H", source, 6)[0] != main_count:
@@ -359,6 +435,8 @@ def convert_route(source, counts=None, *, layout=None):
     pit_points = pit
     if layout == "ade" and (main_count, aux_count) == (283, 30):
         pit_points, pit_events = adelaide_pit_entry(pit, pit_events)
+    elif layout == "a12" and (main_count, aux_count) == (114, 28):
+        pit_events = a1_short_pit_stall_order(pit_events)
     sections = ((main, main_events, 0x1F, 1), (pit, pit_events, 0x27, 0),
                 (auxiliary, aux_events, 3, 0))
 
@@ -535,13 +613,13 @@ def build_pack(reference_disc, donor, destination, courses, sunny_number=None, r
             routes = layouts[code]["routes"]
             folder = output if course == ROAD_AMERICA else output / course.slot
             folder.mkdir(exist_ok=True)
-            route = convert_route(choose_route(donor, code, routes, sunny))
+            route = convert_route(choose_route(donor, code, routes, sunny), layout=code)
             for name, data in circuit_payloads(donor, sunny, code, original_track, original_dma, route).items():
                 (folder / name).write_bytes(data)
             if rain is not None:
                 folder = output / "rain"
                 folder.mkdir()
-                route = convert_route(choose_route(donor, code, routes, rain))
+                route = convert_route(choose_route(donor, code, routes, rain), layout=code)
                 rain_track = read_reference(RAIN_TRACK_SECTOR, RAIN_TRACK_BYTES)
                 rain_dma = read_reference(RAIN_DMA_SECTOR, RAIN_DMA_BYTES)
                 for name, data in circuit_payloads(donor, rain, code, rain_track, rain_dma, route, rain=True).items():

@@ -39,7 +39,7 @@ To work with a newly traced package, substitute `--range HUG SECTOR BYTES` for `
 | File or package | Role in the verified PS2 track path |
 | --- | --- |
 | `tracks.big` | Track catalog. An entry supplies a `TrackID`, names, `LengthInKm`, and an `HOFIndex`. Use a free record index for an additional track. |
-| `events.big` | Event calendars. A `TrackID` must appear in a compatible event to be selectable. The Road America experiment uses Autosport Clio Cup Free Race and Time Trial. |
+| `events.big` | Event calendars. A `TrackID` must appear in an event calendar to be selectable. Rebuilt packs add their layouts to the Free Race and bonus championship calendars. |
 | `TRACK.JPK` | Collision, track-prop data, and a nested package with AI and lap data. On Oschersleben, `osc1.big` contains `osc1.ail` and class-specific `.aib` files. |
 | `DMA1.JPK` | PS2 rendering packages. Geometry members contain VIF/DMA data, scene nodes, and relocation records. RD2 scene nodes require conversion for RD3. |
 | `TRACK.BIG` | Track metadata and environment settings. A track JPAK is available in the observed Oschersleben load, so the loader uses it for object members. The ELF also has a fallback to `TrackObj.big`. |
@@ -113,6 +113,15 @@ python scripts/ModAssets.py replace --file "$addon\TRACK.JPK" col.col "$work\roa
 On Windows 11 Direct3D 12 the experimental course reached frame 8350 from power-on. The guest collision data contained surface type `2` for triangle 1134 where the control package had `0`. The vertex stream matched the control. A separate race opened a repacked `TRACK.JPK` containing an edited `lights.ini`. The captured light resource matched the original copy in the stock companion package. Confirm which resource the loader uses before attributing a visual effect to an archive edit.
 
 The importer can build a [three-course pack](ps2-disc-and-archives.md#add-a1-ring-gp-and-short) with Road America, A1-Ring GP, and A1-Ring Short in separate slots. To edit an A1-Ring member, copy the entire expanded pack and edit the files under `tqa2` or `tqa3`. Keep the two catalogs and all three resource pairs in the candidate. Both A1-Ring layouts have passed Free Race and Time Trial with autosave. The [local lap records](ps2-disc-and-archives.md#local-lap-records) for all three imports coexist in one profile.
+
+#### Use an imported layout in Free Race and custom championships
+
+Rebuild your pack with the current importer and open it with the runner's `--road-america` option. In **Free Race**, choose a vehicle class and scroll through **Select Tracks** until you reach the imported layouts. To set up a multi-round championship, use **Add Track** in the same screen and choose a layout for each row. Event unlocks, scoring, and session rules still apply.
+
+The builder adds imported layouts to 66 Free Race and 49 bonus championship calendars on the verified NTSC disc. It preserves the stock track order and keeps optional stock rounds beyond the original active range hidden. Layouts without a wet scene are offered in Sunny weather. The selector artwork generator currently supplies maps for Autosport Clio Cup. In other classes the imported track name and distance appear in the selector while its picture may be blank.
+
+The Windows runner also handles the alternate scene archive requested by DTM. DTM loads `DMA.JPK`, while the Clio test uses `DMA1.JPK`. Both paths load the built import's scene alongside its collision and route data. The new runner is required when using the expanded calendars. A Windows test completed the first round of a two-round DTM championship at A1-Ring GP and advanced to the race grid at A1-Ring Short. The import checks for each vehicle class remain on the acceptance checklist.
+
 
 ### Generate track-selection maps
 

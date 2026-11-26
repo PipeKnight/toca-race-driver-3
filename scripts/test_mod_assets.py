@@ -10,7 +10,8 @@ import unittest
 
 from BuildFoundryOval import build_route
 from BuildRoadAmericaMod import (
-    A1_RING, ROAD_AMERICA, TrackEntry, event_catalog, read_bigf, repack_bigf, track_catalog, unpack_lzss,
+    A1_RING, ROAD_AMERICA, TrackEntry, a1_short_pit_stall_order, event_catalog, read_bigf, repack_bigf,
+    track_catalog, unpack_lzss,
 )
 from BuildTrackCollisionOverlay import encode_lzss, encode_lzss_compact
 from BuildTrackGeometryOverlay import FOOTER, RELOCATION, VERTEX as SCENE_VERTEX, vif_commands
@@ -375,39 +376,62 @@ class ModAssetTests(unittest.TestCase):
         self.assertIn(b"HOFIndex = 36\r\n", fourth.pop(b"tqa4.ini"))
         self.assertEqual(fourth, expanded)
 
-    def test_only_new_a1_ring_calendar_rounds_offer_sunny_weather(self):
-        calendar = (
-            b"[Info]\r\nRacesNum=9\r\n\r\n[Race 1]\r\nTrackID=hoc3\r\n"
-            b"Weather1=SUNNY\r\nWeather2=RAIN\r\nWeatherProb1=90\r\nWeatherProb2=10\r\n"
-            b"Laps=1\r\n\r\n[Race 2]\r\nTrackID=another\r\n"
-        )
-        other = {f"e{index:03}.ini".encode("ascii"): b"untouched" for index in range(203)}
-        members = {**other, b"rccuf.ini": calendar}
-        original = repack_bigf(b"BIGF" + bytes(0x4000 - 4), members, 0x1360, 0x1360, 0x4000)
-        expanded, _ = read_bigf(event_catalog(original, (ROAD_AMERICA, *A1_RING)), 204)
-        result = expanded.pop(b"rccuf.ini")
-        self.assertEqual(expanded, other)
-        self.assertIn(b"RacesNum=13\r\n", result)
-        for section in (b"[Race 10]", b"[Race 11]"):
-            body = result.split(section + b"\r\n", 1)[1].split(b"\r\n[", 1)[0]
-            self.assertIn(b"Weather2=RAIN\r\n", body)
-        for section, slot in ((b"[Race 12]", b"tqa2"), (b"[Race 13]", b"tqa3")):
-            body = result.split(section + b"\r\n", 1)[1].split(b"\r\n[", 1)[0]
-            self.assertIn(b"TrackID=" + slot + b"\r\n", body)
-            self.assertIn(b"WeatherProb1=100\r\n", body)
-            self.assertNotIn(b"Weather2", body)
-            self.assertNotIn(b"WeatherProb2", body)
+    def test_a1_short_places_team_stall_before_the_timing_line(self):
+        events = [(255, 0, 0, float(i)) for i in range(109)]
+        for i, marker in {39: (2, 1, 3), 40: (2, 0, 4), 41: (255, 0, 6),
+                          42: (3, 1, 3), 44: (3, 0, 4)}.items():
+            events[i] = (*marker, events[i][3])
+        fixed = a1_short_pit_stall_order(events)
+        self.assertEqual([fixed[i][:3] for i in (39, 40, 41, 42, 44)],
+                         [(3, 1, 3), (3, 0, 4), (255, 0, 6), (2, 1, 3), (2, 0, 4)])
+        self.assertEqual([row[1:] for row in fixed], [row[1:] for row in events])
+        self.assertIs(a1_short_pit_stall_order(fixed), fixed)
+
+    def test_imported_rounds_cover_free_race_and_bonus_events(self):
+        def calendar(race_type, active, total):
+            return (f"[General]\r\nRaceType={race_type}\r\nRacesNum={active}\r\n\r\n"
+                    + "".join(f"[Race {i}]\r\nTrackID=hoc{i}\r\n"
+                              "Weather1=Sunny\r\nWeather2=Rain\r\nWeatherProb1=90\r\nWeatherProb2=10\r\n"
+                              "MandatoryPitStop=1\r\nPointsPos1=10\r\n\r\n"
+                              for i in range(1, total + 1))
+                    + "[Rules]\r\nTyreWear=1\r\n").encode("ascii")
+
+        clio = calendar("CUSTOM", 9, 9)
+        bonus = calendar("CUSTOM", 2, 2)
+        hidden_rounds = calendar("CUSTOM", 2, 4)
+        career = calendar("CAREER", 2, 2)
+        members = {f"e{i:03}.ini".encode("ascii"): b"untouched" for i in range(200)}
+        members.update({b"rccuf.ini": clio, b"gokab.ini": bonus, b"bgtnf.ini": hidden_rounds, b"rccu_.ini": career})
+        original = repack_bigf(b"BIGF" + bytes(0x8000 - 4), members, 0x1360, 0x1360, 0x8000)
+        expanded = event_catalog(original, (ROAD_AMERICA, *A1_RING))
+        events, _ = read_bigf(expanded, 204)
+        self.assertEqual(events[b"rccu_.ini"], career)
+        self.assertIn(b"RacesNum=13\r\n", events[b"rccuf.ini"])
+        self.assertIn(b"RacesNum=5\r\n", events[b"gokab.ini"])
+        self.assertIn(b"[Race 6]\r\nTrackID=hoc3", events[b"bgtnf.ini"])
+        self.assertIn(b"[Race 7]\r\nTrackID=hoc4", events[b"bgtnf.ini"])
+        for name, first in ((b"rccuf.ini", 11), (b"gokab.ini", 3), (b"bgtnf.ini", 3)):
+            event = events[name]
+            self.assertTrue(event.endswith(b"[Rules]\r\nTyreWear=1\r\n"))
+            for i, slot in enumerate((b"tqa1", b"tqa2", b"tqa3"), first):
+                body = event.split(f"[Race {i}]\r\n".encode("ascii"), 1)[1].split(b"\r\n[", 1)[0]
+                self.assertIn(b"TrackID=" + slot + b"\r\n", body)
+                self.assertIn(b"MandatoryPitStop=1\r\n", body)
+                self.assertIn(b"PointsPos1=10\r\n", body)
+                self.assertEqual(b"Weather2=Rain" in body, slot == b"tqa1")
+
         foundry = TrackEntry("tqa4", "Foundry Oval", "0.702", 36)
-        existing = event_catalog(original, (ROAD_AMERICA, *A1_RING))
-        fourth, _ = read_bigf(event_catalog(existing, (foundry,), existing_rounds=13, add_oschersleben=False), 204)
-        added = fourth.pop(b"rccuf.ini")
-        self.assertEqual(fourth, other)
-        first, last = added.split(b"[Race 14]\r\n")
-        self.assertIn(b"RacesNum=14\r\n", first)
-        self.assertEqual(first.count(b"TrackID=osc1\r\n"), 1)
-        self.assertIn(b"TrackID=tqa4\r\n", last)
-        self.assertIn(b"WeatherProb1=100\r\n", last)
-        self.assertNotIn(b"Weather2=RAIN", last)
+        dry, _ = read_bigf(event_catalog(original, (ROAD_AMERICA, *A1_RING), rainy_slots=(b"osc1",)), 204)
+        old_pack = repack_bigf(original, {**members, b"rccuf.ini": dry[b"rccuf.ini"]}, 0x1360, 0x1360, 0x8000)
+        staged, _ = read_bigf(event_catalog(old_pack, (foundry,), existing_rounds=13, add_oschersleben=False), 204)
+        for name in (b"rccuf.ini", b"gokab.ini", b"bgtnf.ini"):
+            self.assertEqual(staged[name].count(b"TrackID=tqa1\r\n"), 1)
+            self.assertIn(b"TrackID=tqa4\r\n", staged[name])
+        self.assertNotIn(b"TrackID=osc1", staged[b"gokab.ini"])
+        road_america = staged[b"gokab.ini"].split(b"[Race 3]\r\n", 1)[1].split(b"\r\n[", 1)[0]
+        self.assertIn(b"TrackID=tqa1", road_america)
+        self.assertNotIn(b"Weather2", road_america)
+        self.assertEqual(staged[b"rccu_.ini"], career)
 
     def test_equal_lengths_mark_a_raw_jpak_member_even_with_lzss_flag(self):
         package = self.package()

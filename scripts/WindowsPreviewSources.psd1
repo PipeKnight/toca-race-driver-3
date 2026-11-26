@@ -41,6 +41,7 @@
         'ps2-native-recomp-v0.0.5-dtm-mesh-limits.patch'
         'ps2-native-recomp-v0.0.5-dtm-evo-speed.patch'
         'ps2-native-recomp-v0.0.5-replay-camera-lookup.patch'
+        'ps2-native-recomp-v0.0.5-imported-track-detail.patch'
     )
     DependencyArchives = @(
         'busybox-w64u-FRP-6075-g169694ebd.exe'
